@@ -1,0 +1,16 @@
+# Dependencies & build output (also covered by app/.gitignore)
+node_modules/
+dist/
+
+# Local backups & temp files
+*.zip
+*.tmp
+
+# Env files — never commit secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor noise
+.DS_Store
+Thumbs.db

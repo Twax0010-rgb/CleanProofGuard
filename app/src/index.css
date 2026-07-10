@@ -1,0 +1,168 @@
+@import 'tailwindcss';
+@import '@fontsource/hanken-grotesk/400.css';
+@import '@fontsource/hanken-grotesk/500.css';
+@import '@fontsource/hanken-grotesk/600.css';
+@import '@fontsource/hanken-grotesk/700.css';
+@import '@fontsource/hanken-grotesk/800.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+@import '@fontsource/barlow-condensed/500.css';
+@import '@fontsource/barlow-condensed/600.css';
+@import '@fontsource/barlow-condensed/700.css';
+
+@theme {
+  --font-sans: 'Hanken Grotesk', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  /* Signage face — the letterforms of facility placards and inspection tags. */
+  --font-display: 'Barlow Condensed', 'Hanken Grotesk', system-ui, sans-serif;
+
+  /* Crisper corners than the stock scale — instrument, not toy. */
+  --radius-xl: 0.625rem;
+  --radius-2xl: 0.75rem;
+
+  /* ink / neutrals — warm paper-and-ink, not screen gray */
+  --color-ink: #1d231f;
+  --color-ink-soft: #59645c;
+  --color-muted: #808b81;
+  --color-line: #e2e5da;
+  --color-line-soft: #eaede2;
+  --color-line-softer: #eff1e8;
+  --color-hairline: #dde1d4;
+  --color-stroke: #ccd2c2;
+  --color-stroke-soft: #c1c8b6;
+  --color-dash: #bec5b2;
+  --color-app: #f2f3eb;
+  --color-panel: #f8f8f2;
+  --color-canvas: #e7e9dd;
+
+  /* verified / clean (deep pine — the stamp ink) */
+  --color-verified: #216b4b;
+  --color-verified-ink: #1a5539;
+  --color-verified-tint: #e2eddf;
+
+  /* attention (safety amber) */
+  --color-attention: #b27a0f;
+
+  /* overdue (stamp red) */
+  --color-overdue: #b3261e;
+  --color-overdue-tint: #f7e5e1;
+  --color-overdue-border: #ebd3cb;
+
+  /* info (blue, used for a staff member's identity color) */
+  --color-info: #35668c;
+  --color-info-ink: #2a5270;
+  --color-info-tint: #e7eef3;
+
+  --animate-cpg-blink: cpgblink 1s steps(1) infinite;
+  --animate-cpg-blink-soft: cpgblink 1.4s ease-in-out infinite;
+  --animate-cpg-scan: cpgscan 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes cpgblink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes cpgscan {
+  0% {
+    transform: translateY(-64px);
+  }
+  100% {
+    transform: translateY(64px);
+  }
+}
+
+/* ————— Dark mode ("night shift") —————
+   The whole palette lives in CSS variables, so re-skinning is a matter of overriding them
+   under a `.dark` class on <html> (toggled by the ThemeToggle button, persisted per browser).
+   Same warm paper-and-ink hues, inverted: charcoal paper, chalk ink. */
+.dark {
+  --color-ink: #e7ebe5;
+  --color-ink-soft: #aab5ab;
+  --color-muted: #7e8a80;
+  --color-line: #2e352f;
+  --color-line-soft: #29302a;
+  --color-line-softer: #242b25;
+  --color-hairline: #2e352f;
+  --color-stroke: #414a41;
+  --color-stroke-soft: #4b554b;
+  --color-dash: #515b51;
+  --color-app: #171b18;
+  --color-panel: #1b201c;
+  --color-canvas: #101311;
+
+  --color-verified: #2f8a61;
+  --color-verified-ink: #7cc9a3;
+  --color-verified-tint: #1e3428;
+
+  --color-attention: #d9a03a;
+
+  --color-overdue: #d96055;
+  --color-overdue-tint: #38211e;
+  --color-overdue-border: #4a2c27;
+
+  --color-info: #5b8fb5;
+  --color-info-ink: #93bcd9;
+  --color-info-tint: #1f2b35;
+}
+
+/* `bg-white` is the card surface throughout — remap it (and white borders) to an elevated
+   dark surface. `text-white` intentionally stays white: it only ever sits on colored fills. */
+.dark :is(.bg-white) {
+  background-color: #212723;
+}
+.dark :is(.border-white) {
+  border-color: #212723;
+}
+/* `bg-ink` is used for dark chips/buttons with white text — in dark mode --color-ink flips to
+   chalk, which would put white text on a light fill. Pin it near-black instead. */
+.dark :is(.bg-ink) {
+  background-color: #0d100e;
+}
+/* The rubber stamp multiplies into the paper; on dark paper, screen it instead. */
+.dark .cpg-stamp {
+  mix-blend-mode: screen;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+}
+
+#root {
+  min-height: 100svh;
+}
+
+/* Rubber-stamp seal — the one loud element; everything around it stays quiet. */
+.cpg-stamp {
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  border: 3px double currentColor;
+  border-radius: 6px;
+  padding: 0.3em 0.75em 0.26em;
+  transform: rotate(-6deg);
+  mix-blend-mode: multiply;
+  opacity: 0.92;
+  line-height: 1;
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
