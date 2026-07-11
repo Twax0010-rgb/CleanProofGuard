@@ -104,6 +104,31 @@ create table if not exists admin_profiles (
 create unique index if not exists admin_profiles_staff_id_key on admin_profiles (lower(staff_id)) where staff_id is not null;
 create unique index if not exists admin_profiles_email_key on admin_profiles (lower(email)) where email is not null;
 
+-- Editable location categories. Global (all-branch) or scoped to one branch.
+-- Archived (is_active=false) categories are hidden from the New Area dropdown but
+-- still label their existing areas until reassigned.
+create table if not exists location_categories (
+  id uuid primary key default gen_random_uuid(),
+  site_id uuid not null references sites(id) on delete cascade,
+  name text not null,
+  slug text not null,
+  description text,
+  icon text,
+  color text,
+  branch_id uuid references branches(id) on delete cascade,
+  is_global boolean not null default true,
+  is_active boolean not null default true,
+  sort_order int not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz,
+  created_by uuid,
+  archived_at timestamptz,
+  archived_by uuid
+);
+create unique index if not exists loc_cat_global_name_key on location_categories (site_id, lower(name)) where is_global = true;
+create unique index if not exists loc_cat_branch_name_key on location_categories (site_id, branch_id, lower(name)) where is_global = false;
+create index if not exists loc_cat_site_idx on location_categories (site_id);
+
 -- A physical space that gets cleaned. Areas are persistent config; assignments
 -- (below) are individual cleaning-cycle instances against an area.
 create table if not exists areas (
@@ -112,7 +137,10 @@ create table if not exists areas (
   branch_id uuid references branches(id) on delete set null,
   name text not null,
   code text not null unique,
-  category text not null default 'other' check (category in ('bathroom', 'office', 'common', 'kitchen', 'outdoor', 'other')),
+  -- Denormalized category label/slug, kept for history + backward compat. The real link
+  -- is category_id -> location_categories (no CHECK: any category name is allowed now).
+  category text not null default 'other',
+  category_id uuid references location_categories(id) on delete set null,
   -- How often this area must be re-cleaned, in minutes. Null = manual/one-off scheduling.
   frequency_minutes int,
   task_template jsonb not null default '["Wipe & disinfect surfaces", "Empty & reline bins", "Sweep / vacuum floor", "Restock supplies"]',
@@ -488,7 +516,8 @@ create or replace function create_area(
   p_code text,
   p_category text,
   p_frequency_minutes int,
-  p_task_template text[]
+  p_task_template text[],
+  p_category_id uuid default null
 )
 returns setof areas
 language plpgsql
@@ -506,8 +535,8 @@ begin
     raise exception 'Not authorized to add an area';
   end if;
 
-  insert into areas (site_id, branch_id, name, code, category, frequency_minutes, task_template)
-  values (p_site_id, p_branch_id, p_name, p_code, p_category, p_frequency_minutes, to_jsonb(p_task_template))
+  insert into areas (site_id, branch_id, name, code, category, category_id, frequency_minutes, task_template)
+  values (p_site_id, p_branch_id, p_name, p_code, p_category, p_category_id, p_frequency_minutes, to_jsonb(p_task_template))
   returning * into v_area;
 
   select coalesce(max(sort_order), 0) + 1 into v_sort_order from assignments where site_id = p_site_id;
@@ -535,7 +564,107 @@ begin
 end;
 $$;
 
-grant execute on function create_area(uuid, uuid, text, text, text, int, text[]) to authenticated;
+grant execute on function create_area(uuid, uuid, text, text, text, int, text[], uuid) to authenticated;
+
+-- ————— Location categories (superuser-managed, or via categories.manage grant) —————
+
+create or replace function admin_can_manage_categories(p_site_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from admin_profiles
+    where id = auth.uid() and account_status = 'active' and site_id = p_site_id
+      and (role = 'superuser' or coalesce((permissions->'categories'->>'manage')::boolean, false))
+  )
+$$;
+
+create or replace function create_location_category(
+  p_site_id uuid, p_name text, p_description text, p_icon text, p_color text, p_branch_id uuid, p_is_global boolean
+)
+returns setof location_categories language plpgsql security definer set search_path = public as $$
+declare v_slug text := lower(regexp_replace(trim(p_name), '\s+', '-', 'g'));
+begin
+  if not admin_can_manage_categories(p_site_id) then raise exception 'Not authorized to create categories'; end if;
+  if p_is_global and exists (select 1 from location_categories where site_id = p_site_id and is_global and lower(name) = lower(trim(p_name))) then
+    raise exception 'A category named "%" already exists.', trim(p_name); end if;
+  if not p_is_global and exists (select 1 from location_categories where site_id = p_site_id and not is_global and branch_id = p_branch_id and lower(name) = lower(trim(p_name))) then
+    raise exception 'A category named "%" already exists in this branch.', trim(p_name); end if;
+  return query
+  insert into location_categories (site_id, name, slug, description, icon, color, branch_id, is_global, created_by, sort_order)
+  values (p_site_id, trim(p_name), v_slug, nullif(trim(coalesce(p_description,'')),''), nullif(trim(coalesce(p_icon,'')),''),
+    nullif(trim(coalesce(p_color,'')),''), case when p_is_global then null else p_branch_id end, p_is_global, auth.uid(),
+    coalesce((select max(sort_order) + 10 from location_categories where site_id = p_site_id), 10))
+  returning *;
+end; $$;
+
+create or replace function update_location_category(
+  p_id uuid, p_name text, p_description text, p_icon text, p_color text, p_sort_order int
+)
+returns setof location_categories language plpgsql security definer set search_path = public as $$
+declare v_site uuid; v_global boolean; v_branch uuid;
+begin
+  select site_id, is_global, branch_id into v_site, v_global, v_branch from location_categories where id = p_id;
+  if v_site is null or not admin_can_manage_categories(v_site) then raise exception 'Not authorized to edit categories'; end if;
+  if p_name is not null and exists (
+    select 1 from location_categories where id <> p_id and site_id = v_site and is_global = v_global
+      and coalesce(branch_id, '00000000-0000-0000-0000-000000000000') = coalesce(v_branch, '00000000-0000-0000-0000-000000000000')
+      and lower(name) = lower(trim(p_name))
+  ) then raise exception 'A category named "%" already exists.', trim(p_name); end if;
+  return query
+  update location_categories set
+    name = coalesce(nullif(trim(p_name), ''), name),
+    slug = case when p_name is not null and trim(p_name) <> '' then lower(regexp_replace(trim(p_name), '\s+', '-', 'g')) else slug end,
+    description = coalesce(p_description, description), icon = coalesce(p_icon, icon),
+    color = coalesce(p_color, color), sort_order = coalesce(p_sort_order, sort_order), updated_at = now()
+  where id = p_id returning *;
+end; $$;
+
+create or replace function set_category_active(p_id uuid, p_active boolean)
+returns setof location_categories language plpgsql security definer set search_path = public as $$
+declare v_site uuid;
+begin
+  select site_id into v_site from location_categories where id = p_id;
+  if v_site is null or not admin_can_manage_categories(v_site) then raise exception 'Not authorized to change categories'; end if;
+  return query
+  update location_categories set is_active = p_active,
+    archived_at = case when p_active then null else now() end,
+    archived_by = case when p_active then null else auth.uid() end, updated_at = now()
+  where id = p_id returning *;
+end; $$;
+
+create or replace function delete_location_category(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_site uuid; v_uses int;
+begin
+  select site_id into v_site from location_categories where id = p_id;
+  if v_site is null or not admin_can_manage_categories(v_site) then raise exception 'Not authorized to delete categories'; end if;
+  select count(*) into v_uses from areas where category_id = p_id;
+  if v_uses > 0 then raise exception 'This category is used by % location(s). Reassign those locations before deleting.', v_uses; end if;
+  delete from location_categories where id = p_id;
+end; $$;
+
+create or replace function reassign_area_category(p_from_id uuid, p_to_id uuid)
+returns int language plpgsql security definer set search_path = public as $$
+declare v_site uuid; v_to_site uuid; v_slug text; v_count int;
+begin
+  select site_id into v_site from location_categories where id = p_from_id;
+  select site_id, slug into v_to_site, v_slug from location_categories where id = p_to_id;
+  if v_site is null or v_to_site is null or v_site <> v_to_site or not admin_can_manage_categories(v_site) then
+    raise exception 'Not authorized to reassign categories'; end if;
+  update areas set category_id = p_to_id, category = v_slug where category_id = p_from_id;
+  get diagnostics v_count = row_count;
+  return v_count;
+end; $$;
+
+alter table location_categories enable row level security;
+create policy "admins read categories at their site" on location_categories for select
+  to authenticated using (current_admin_role(site_id) is not null);
+
+grant execute on function admin_can_manage_categories(uuid) to authenticated;
+grant execute on function create_location_category(uuid, text, text, text, text, uuid, boolean) to authenticated;
+grant execute on function update_location_category(uuid, text, text, text, text, int) to authenticated;
+grant execute on function set_category_active(uuid, boolean) to authenticated;
+grant execute on function delete_location_category(uuid) to authenticated;
+grant execute on function reassign_area_category(uuid, uuid) to authenticated;
 
 -- ————— Branches & access (superuser-managed) —————
 
@@ -628,7 +757,8 @@ create or replace function update_area(
   p_name text,
   p_category text,
   p_task_template text[],
-  p_active boolean
+  p_active boolean,
+  p_category_id uuid default null
 )
 returns setof areas
 language plpgsql
@@ -651,6 +781,7 @@ begin
   update areas set
     name = coalesce(p_name, name),
     category = coalesce(p_category, category),
+    category_id = coalesce(p_category_id, category_id),
     task_template = case when p_task_template is not null then to_jsonb(p_task_template) else task_template end,
     active = coalesce(p_active, active)
   where id = p_area_id
@@ -683,7 +814,7 @@ begin
 end;
 $$;
 
-grant execute on function update_area(uuid, text, text, text[], boolean) to authenticated;
+grant execute on function update_area(uuid, text, text, text[], boolean, uuid) to authenticated;
 
 -- Global task templates — Super Admin only, per checklist.
 create or replace function create_task_template(

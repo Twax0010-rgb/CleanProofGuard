@@ -1,14 +1,13 @@
 import { formatFrequency } from './domain'
 import type { ReportField } from './reports'
-import type { Area, AreaCategory } from './types'
-
-const VALID_CATEGORIES: AreaCategory[] = ['bathroom', 'office', 'common', 'kitchen', 'outdoor', 'other']
+import type { Area } from './types'
 
 export interface AreaImportRow {
   rowNumber: number
   code: string
   name: string
-  category: AreaCategory
+  /** Category slug — any value is accepted; the repo links it to a matching category if one exists. */
+  category: string
   frequencyMinutes: number | null
   taskTemplate: string[]
   active: boolean
@@ -150,14 +149,9 @@ export function parseLocationImportCsv(text: string, existingCodes: Set<string>)
       errors.push({ rowNumber, column: 'area_code', message: `Duplicate area code "${code}" within this file.` })
       continue
     }
-    let category: AreaCategory = 'other'
-    if (categoryRaw) {
-      if (!(VALID_CATEGORIES as string[]).includes(categoryRaw)) {
-        errors.push({ rowNumber, column: 'category', message: `"${categoryRaw}" is not valid. Use one of: ${VALID_CATEGORIES.join(', ')}.` })
-        continue
-      }
-      category = categoryRaw as AreaCategory
-    }
+    // Any category is accepted; it's slugified and linked to an existing category if one matches
+    // (missing categories keep the label but stay unlinked until a superuser creates them).
+    const category: string = categoryRaw ? categoryRaw.trim().toLowerCase().replace(/\s+/g, '-') : 'other'
     let frequencyMinutes: number | null = null
     if (frequencyRaw && frequencyRaw !== 'manual') {
       const parsed = Number(frequencyRaw)

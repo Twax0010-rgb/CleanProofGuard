@@ -9,6 +9,7 @@ import type {
   ImportBatch,
   Issue,
   IssueSeverity,
+  LocationCategory,
   PermissionOverrides,
   PhotoReviewStatus,
   ProofPhotoView,
@@ -47,7 +48,9 @@ export interface CreateAreaInput {
   name: string
   /** Auto-generated if omitted. */
   code?: string
+  /** Category slug (denormalized label). Pair with categoryId for the real link. */
   category: Area['category']
+  categoryId?: string | null
   frequencyMinutes: number | null
   taskTemplate: string[]
   /** Branch this area belongs to. */
@@ -57,8 +60,27 @@ export interface CreateAreaInput {
 export interface UpdateAreaInput {
   name?: string
   category?: Area['category']
+  categoryId?: string | null
   taskTemplate?: string[]
   active?: boolean
+}
+
+export interface CreateCategoryInput {
+  name: string
+  description?: string | null
+  icon?: string | null
+  color?: string | null
+  /** Only meaningful when isGlobal is false. */
+  branchId?: string | null
+  isGlobal: boolean
+}
+
+export interface UpdateCategoryInput {
+  name?: string
+  description?: string | null
+  icon?: string | null
+  color?: string | null
+  sortOrder?: number
 }
 
 export interface SaveReportTemplateInput {
@@ -277,6 +299,19 @@ export interface DataRepo {
   /** Permanently removes an area with no cleaning history. Areas with completed proof, photos,
    * or issues can't be hard-deleted (deactivate those instead) — history must stay auditable. */
   deleteArea(areaId: string): Promise<void>
+
+  // ————— Location categories —————
+  /** All categories at the site (active + archived); the UI filters. */
+  listCategories(siteId: string): Promise<LocationCategory[]>
+  /** Manage-categories permission required. Throws on a duplicate name in the same scope. */
+  createCategory(siteId: string, input: CreateCategoryInput): Promise<LocationCategory>
+  updateCategory(categoryId: string, patch: UpdateCategoryInput): Promise<LocationCategory>
+  /** Archive (active=false) or restore (active=true) a category. */
+  setCategoryActive(categoryId: string, active: boolean): Promise<LocationCategory>
+  /** Hard-delete — throws with a reassign message if any area still uses it. */
+  deleteCategory(categoryId: string): Promise<void>
+  /** Bulk-move every area from one category to another; returns how many moved. */
+  reassignCategory(fromCategoryId: string, toCategoryId: string): Promise<number>
 
   /** Staff flags a problem — an alternative (or addition) to marking an area clean. */
   reportIssue(

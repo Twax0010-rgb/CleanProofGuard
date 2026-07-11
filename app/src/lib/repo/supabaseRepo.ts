@@ -1,6 +1,6 @@
 import { colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
 import { supabase } from '../supabaseClient'
-import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Branch, BranchStatus, ChecklistTask, ImportBatch, Issue, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
+import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Branch, BranchStatus, ChecklistTask, ImportBatch, Issue, LocationCategory, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
 import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ImportAreaRow, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput, UpdateTaskInput } from './types'
 
 /** Turn a raw Postgres/RPC error into the friendly duplicate messages the UI expects. */
@@ -165,11 +165,30 @@ function mapArea(row: Record<string, unknown>): Area {
     branchId: (row.branch_id as string) ?? '',
     name: row.name as string,
     code: row.code as string,
-    category: row.category as Area['category'],
+    category: (row.category as Area['category']) ?? 'other',
+    categoryId: (row.category_id as string) ?? null,
     frequencyMinutes: (row.frequency_minutes as number) ?? null,
     taskTemplate: (row.task_template as string[]) ?? [],
     lastCleanedAt: (row.last_cleaned_at as string) ?? null,
     active: (row.active as boolean) ?? true,
+  }
+}
+
+function mapCategory(row: Record<string, unknown>): LocationCategory {
+  return {
+    id: row.id as string,
+    siteId: row.site_id as string,
+    name: row.name as string,
+    slug: row.slug as string,
+    description: (row.description as string) ?? null,
+    icon: (row.icon as string) ?? null,
+    color: (row.color as string) ?? null,
+    branchId: (row.branch_id as string) ?? null,
+    isGlobal: (row.is_global as boolean) ?? true,
+    isActive: (row.is_active as boolean) ?? true,
+    sortOrder: (row.sort_order as number) ?? 0,
+    createdAt: (row.created_at as string) ?? new Date().toISOString(),
+    archivedAt: (row.archived_at as string) ?? null,
   }
 }
 
@@ -669,6 +688,7 @@ export const supabaseRepo: DataRepo = {
       p_category: input.category,
       p_frequency_minutes: input.frequencyMinutes,
       p_task_template: input.taskTemplate,
+      p_category_id: input.categoryId ?? null,
     })
     if (error) {
       if (error.message.includes('areas_code')) throw new Error(`Area code "${code}" is already in use.`)
@@ -710,16 +730,25 @@ export const supabaseRepo: DataRepo = {
       p_category: patch.category ?? null,
       p_task_template: patch.taskTemplate ?? null,
       p_active: patch.active ?? null,
+      p_category_id: patch.categoryId ?? null,
     })
     if (error) throw error
     const row = Array.isArray(data) ? data[0] : data
     const area = mapArea(row)
-    const statusNote = patch.active === false && before?.active ? 'deactivated' : patch.active === true && before?.active === false ? 'reactivated' : null
-    await logAudit(area.siteId, 'area_updated', area.name, statusNote)
+    if (patch.categoryId !== undefined && patch.categoryId !== before?.categoryId) {
+      await logAudit(area.siteId, 'area_category_changed', area.name, area.category)
+    } else {
+      const statusNote = patch.active === false && before?.active ? 'deactivated' : patch.active === true && before?.active === false ? 'reactivated' : null
+      await logAudit(area.siteId, 'area_updated', area.name, statusNote)
+    }
     return area
   },
 
   async importAreas(siteId, fileName, rows: ImportAreaRow[], failedCount) {
+    // Resolve each row's category slug to a real category_id (matched to an existing category).
+    const { data: catRows } = await client().from('location_categories').select('id, slug').eq('site_id', siteId)
+    const catIdBySlug = new Map((catRows ?? []).map((c) => [(c.slug as string).toLowerCase(), c.id as string]))
+    const catId = (slug: string) => catIdBySlug.get(slug.toLowerCase()) ?? null
     let successCount = 0
     for (const row of rows) {
       if (row.isUpdate) {
@@ -736,6 +765,7 @@ export const supabaseRepo: DataRepo = {
           p_category: row.category,
           p_task_template: row.taskTemplate,
           p_active: row.active,
+          p_category_id: catId(row.category),
         })
         if (error) continue
       } else {
@@ -747,12 +777,13 @@ export const supabaseRepo: DataRepo = {
           p_category: row.category,
           p_frequency_minutes: row.frequencyMinutes,
           p_task_template: row.taskTemplate,
+          p_category_id: catId(row.category),
         })
         if (error) continue
         if (!row.active) {
           // create_area always starts an area active — deactivate right after if the file said otherwise.
           const { data: created } = await client().from('areas').select('id').eq('site_id', siteId).ilike('code', row.code).maybeSingle()
-          if (created) await client().rpc('update_area', { p_area_id: created.id, p_name: null, p_category: null, p_task_template: null, p_active: false })
+          if (created) await client().rpc('update_area', { p_area_id: created.id, p_name: null, p_category: null, p_task_template: null, p_active: false, p_category_id: null })
         }
       }
       successCount++
@@ -777,6 +808,77 @@ export const supabaseRepo: DataRepo = {
     if (error) throw error
     await logAudit(siteId, 'locations_imported', fileName, `${successCount} imported, ${failedCount} failed`)
     return mapImportBatch(data)
+  },
+
+  // ————— Location categories —————
+
+  async listCategories(siteId) {
+    const { data, error } = await client()
+      .from('location_categories')
+      .select('*')
+      .eq('site_id', siteId)
+      .order('sort_order', { ascending: true })
+    if (error) throw error
+    return (data ?? []).map(mapCategory)
+  },
+
+  async createCategory(siteId, input) {
+    const { data, error } = await client().rpc('create_location_category', {
+      p_site_id: siteId,
+      p_name: input.name.trim(),
+      p_description: input.description ?? null,
+      p_icon: input.icon ?? null,
+      p_color: input.color ?? null,
+      p_branch_id: input.isGlobal ? null : input.branchId ?? null,
+      p_is_global: input.isGlobal,
+    })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const category = mapCategory(row)
+    await logAudit(siteId, 'category_created', category.name)
+    return category
+  },
+
+  async updateCategory(categoryId, patch) {
+    const { data, error } = await client().rpc('update_location_category', {
+      p_id: categoryId,
+      p_name: patch.name ?? null,
+      p_description: patch.description ?? null,
+      p_icon: patch.icon ?? null,
+      p_color: patch.color ?? null,
+      p_sort_order: patch.sortOrder ?? null,
+    })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const category = mapCategory(row)
+    await logAudit(category.siteId, 'category_updated', category.name)
+    return category
+  },
+
+  async setCategoryActive(categoryId, active) {
+    const { data, error } = await client().rpc('set_category_active', { p_id: categoryId, p_active: active })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const category = mapCategory(row)
+    await logAudit(category.siteId, active ? 'category_restored' : 'category_archived', category.name)
+    return category
+  },
+
+  async deleteCategory(categoryId) {
+    const { data: cat } = await client().from('location_categories').select('site_id, name').eq('id', categoryId).maybeSingle()
+    const { error } = await client().rpc('delete_location_category', { p_id: categoryId })
+    if (error) throw new Error(error.message)
+    if (cat) await logAudit(cat.site_id as string, 'category_deleted', cat.name as string)
+  },
+
+  async reassignCategory(fromCategoryId, toCategoryId) {
+    const { data: cats } = await client().from('location_categories').select('id, name, site_id').in('id', [fromCategoryId, toCategoryId])
+    const { data, error } = await client().rpc('reassign_area_category', { p_from_id: fromCategoryId, p_to_id: toCategoryId })
+    if (error) throw new Error(error.message)
+    const from = (cats ?? []).find((c) => c.id === fromCategoryId)
+    const to = (cats ?? []).find((c) => c.id === toCategoryId)
+    if (from) await logAudit(from.site_id as string, 'category_reassigned', `${from.name} → ${to?.name ?? '—'}`, `${data ?? 0} location(s)`)
+    return (data as number) ?? 0
   },
 
   async listImportBatches(siteId) {

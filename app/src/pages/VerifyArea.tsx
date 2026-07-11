@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { AREA_CATEGORY_LABELS, formatDuration, frequencyCountdown } from '../lib/domain'
+import { categorySlugLabel, formatDuration, frequencyCountdown } from '../lib/domain'
 import { CURRENT_SITE_ID, repo } from '../lib/repo'
 import type { Area } from '../lib/types'
 
@@ -46,7 +46,7 @@ export function VerifyArea() {
     <CenteredShell>
       <TagCard>
         <div className="mt-4 text-center font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-          {area.code} · {AREA_CATEGORY_LABELS[area.category]}
+          {area.code} · {categorySlugLabel(area.category)}
         </div>
         <h1 className="font-display mt-1 text-center text-[34px] font-bold uppercase leading-[0.98]">
           {area.name}

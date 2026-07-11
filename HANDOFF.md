@@ -1,8 +1,45 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-11 fifth session, for the next session)
-**No task in progress.** Newest work — the **Users & Access page was rebuilt to match the Staff
-page** (admin/dashboard accounts only; staff stay on the Staff page). All verified in the browser
+## ⏸ Where we left off (2026-07-11 sixth session, for the next session)
+**No task in progress.** Newest work — **editable location categories + Live Map grouped by
+category**. Verified in the browser against Supabase as thando@ (superuser):
+- **New `location_categories` table** (global or branch-scoped; name/slug/description/icon/color/
+  sort_order/is_active + archived_at/by + created_by). Seeded 12 defaults for the demo site
+  (Bathroom…Parking) + `areas.category_id` FK backfilled from the old `category` text. The old
+  6-value CHECK on `areas.category` was dropped — `Area.category` is now a free slug string kept
+  as a denormalized label, with `Area.categoryId` the real link. (Migrations `location_categories`,
+  `location_category_rpcs`, `area_category_id_params`; schema.sql mirrors all of it.)
+- **Categories are managed via RPCs** (superuser, or anyone with the new `categories.manage`
+  permission override): `create/update/delete/set_active/reassign_area_category`, gated by
+  `admin_can_manage_categories()`. Deleting a category that's in use is blocked with a reassign
+  message; archived categories drop out of the New Area dropdown but still label their areas.
+- **New Area / Edit Area modals** use a dynamic category dropdown; New Area has a "+" that opens an
+  inline "New category" form (name/color/icon/scope) which saves and auto-selects the category.
+- **Locations page**: filter pills now come from the backend (active categories, colored dots),
+  plus a "Manage categories" button opening `ManageCategories.tsx` (search, scope/status filters,
+  add/edit name+color+icon, reorder, archive/restore, delete-if-unused, bulk reassign).
+- **Live Map** now groups by **Category → Floor → cards** by default, with a Group by
+  Category/Floor/Branch toggle (persisted to localStorage `cpg_livemap_groupby`), a category
+  filter, collapsible sections, and per-category counts (clean / in progress / overdue / not
+  recorded). Status colors still drive the tiles; category color is only a small dot.
+- **Permissions**: a new `categories` AdminFeature (view default for admin/manager/supervisor/
+  read-only; manage superuser-only unless granted). Enforced on the backend RPCs, not just hidden.
+- **Reports/import/export** flow the category through: reports + export use the category label;
+  import accepts any category slug and links it to a matching category_id server-side.
+- Audit actions added: category_created/updated/archived/restored/deleted, area_category_changed,
+  category_reassigned. Mock seed bumped to `cpg_mock_state_v16`.
+- Verified: create category from New Area "+" (real Supabase row, auto-selected), save area linked
+  to it, pill on Locations, area on Live Map under its category+floor, group-by toggle, Manage
+  categories edit/archive (hidden from New Area), used-category delete blocked → reassign. All
+  test artifacts removed from the live DB. Build + lint clean.
+- **Known minor gap**: the category read RLS is site-level, so a branch-restricted admin could see
+  another branch's branch-specific categories in pickers (all seeded categories are global, so it
+  doesn't show in the demo). Tighten the `location_categories` select policy by branch access if
+  branch-specific categories get real use.
+
+## Previous session (2026-07-11, fifth session)
+**No task in progress.** The **Users & Access page was rebuilt to match the Staff
+page** (admin/dashboard accounts only; staff stay on the Staff page). Verified in the browser
 against Supabase as thando@ (superuser):
 - **Staff-style layout**: page header with count + branch scope, filter pills (All / Active /
   Disabled / Archived), search over name/ID/email/role/branch, card rows with avatar, name,

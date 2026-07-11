@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAdminAuth } from '../../contexts/AdminAuthContext'
 import { inActiveBranch, useBranch } from '../../contexts/BranchContext'
-import { AREA_CATEGORY_LABELS, AUDIT_ACTION_LABELS, canManageRoutes, effectiveStatus, formatClock, formatDuration, ISSUE_SEVERITY_LABELS } from '../../lib/domain'
+import { AUDIT_ACTION_LABELS, canManageRoutes, categorySlugLabel, effectiveStatus, formatClock, formatDuration, ISSUE_SEVERITY_LABELS } from '../../lib/domain'
 import { repo } from '../../lib/repo'
-import type { Area, AreaCategory, Assignment, AuditLogEntry, Issue, Staff } from '../../lib/types'
+import type { Area, Assignment, AuditLogEntry, Issue, Staff } from '../../lib/types'
 import { AdminLayout } from '../AdminLayout'
 import { ReportBuilderPanel } from '../ReportBuilderPanel'
 
@@ -63,7 +63,7 @@ export function Reports() {
   const areasById = useMemo(() => new Map(bAreas.map((a) => [a.id, a])), [bAreas])
 
   const byCategory = useMemo(() => {
-    const groups = new Map<AreaCategory, { total: number; done: number; overdue: number }>()
+    const groups = new Map<string, { total: number; done: number; overdue: number }>()
     for (const a of bAssignments) {
       const category = areasById.get(a.areaId)?.category ?? 'other'
       const bucket = groups.get(category) ?? { total: 0, done: 0, overdue: 0 }
@@ -136,7 +136,7 @@ export function Reports() {
             <div className="flex flex-col gap-2.5">
               {byCategory.map(([category, stats]) => (
                 <div key={category} className="flex items-center gap-3">
-                  <div className="w-28 flex-shrink-0 text-sm font-semibold">{AREA_CATEGORY_LABELS[category]}</div>
+                  <div className="w-28 flex-shrink-0 text-sm font-semibold">{categorySlugLabel(category)}</div>
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-line-soft">
                     <div
                       className="h-full bg-verified"

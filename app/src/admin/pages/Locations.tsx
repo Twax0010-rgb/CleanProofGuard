@@ -4,7 +4,7 @@ import { QrModal } from '../../components/QrModal'
 import { Field, inputCls, ModalShell } from '../../components/ui/Modal'
 import { useAdminAuth } from '../../contexts/AdminAuthContext'
 import { inActiveBranch, useBranch } from '../../contexts/BranchContext'
-import { AREA_CATEGORY_LABELS, FREQUENCY_PRESETS, canManageAreas, formatClock, formatDuration, formatFrequency, frequencyCountdown } from '../../lib/domain'
+import { FREQUENCY_PRESETS, canManageAreas, canManageCategories, categorySlugLabel, formatClock, formatDuration, formatFrequency, frequencyCountdown } from '../../lib/domain'
 import {
   AREA_EXPORT_FIELDS,
   buildAreaExportRows,
@@ -17,22 +17,23 @@ import { exportRowsToCsv, exportRowsToXlsx } from '../../lib/reportExport'
 import { toLocalDateStamp } from '../../lib/reports'
 import { repo } from '../../lib/repo'
 import type { CreateAreaInput, ImportAreaRow, UpdateAreaInput } from '../../lib/repo/types'
-import type { Area, AreaCategory, Branch, ImportBatch } from '../../lib/types'
+import type { Area, Branch, ImportBatch, LocationCategory } from '../../lib/types'
 import { AdminLayout } from '../AdminLayout'
-
-const CATEGORY_FILTERS: Array<AreaCategory | 'all'> = ['all', 'bathroom', 'kitchen', 'office', 'common', 'outdoor', 'other']
+import { ManageCategoriesModal } from './ManageCategories'
 
 export function Locations() {
   const { admin } = useAdminAuth()
   const { activeBranchId, activeBranch, branches } = useBranch()
   const [areas, setAreas] = useState<Area[]>([])
+  const [categories, setCategories] = useState<LocationCategory[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<AreaCategory | 'all'>('all')
+  const [filter, setFilter] = useState<string>('all')
   const [qrArea, setQrArea] = useState<Area | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [editArea, setEditArea] = useState<Area | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [manageCatsOpen, setManageCatsOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Area | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -42,8 +43,9 @@ export function Locations() {
   useEffect(() => {
     if (!admin) return
     function load() {
-      repo.listAreasForSite(admin!.siteId).then((a) => {
+      Promise.all([repo.listAreasForSite(admin!.siteId), repo.listCategories(admin!.siteId)]).then(([a, c]) => {
         setAreas(a)
+        setCategories(c)
         setLoading(false)
       })
     }
@@ -62,11 +64,19 @@ export function Locations() {
     return () => clearInterval(id)
   }, [])
 
+  const categoriesById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+  const categoryLabel = (area: Area) =>
+    (area.categoryId && categoriesById.get(area.categoryId)?.name) || categorySlugLabel(area.category)
+  const categoryColor = (area: Area) => (area.categoryId && categoriesById.get(area.categoryId)?.color) || null
+
+  // Filter pills come from the backend: active categories, plus any archived category still in use.
+  const activeCategories = useMemo(() => categories.filter((c) => c.isActive).sort((a, b) => a.sortOrder - b.sortOrder), [categories])
+
   const filtered = useMemo(
     () =>
       areas
         .filter((a) => inActiveBranch(a.branchId, activeBranchId))
-        .filter((a) => filter === 'all' || a.category === filter)
+        .filter((a) => filter === 'all' || a.categoryId === filter)
         .sort((a, b) => a.name.localeCompare(b.name)),
     [areas, filter, activeBranchId],
   )
@@ -116,6 +126,7 @@ export function Locations() {
   }
 
   const canEdit = canManageAreas(admin.role)
+  const canManageCats = canManageCategories(admin)
 
   return (
     <AdminLayout>
@@ -144,6 +155,14 @@ export function Locations() {
           >
             Export Excel
           </button>
+          {canManageCats && (
+            <button
+              onClick={() => setManageCatsOpen(true)}
+              className="flex h-9.5 items-center gap-1.5 rounded-[11px] border border-line bg-white px-3.5 text-sm font-bold text-ink-soft"
+            >
+              Manage categories
+            </button>
+          )}
           {canEdit && (
             <>
               <button
@@ -168,15 +187,24 @@ export function Locations() {
 
       <div className="flex-1 overflow-auto p-6">
         <div className="mb-4 flex flex-wrap gap-2">
-          {CATEGORY_FILTERS.map((c) => (
+          <button
+            onClick={() => setFilter('all')}
+            className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
+              filter === 'all' ? 'bg-ink text-white' : 'border border-line bg-white text-ink-soft'
+            }`}
+          >
+            All areas
+          </button>
+          {activeCategories.map((c) => (
             <button
-              key={c}
-              onClick={() => setFilter(c)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
-                filter === c ? 'bg-ink text-white' : 'border border-line bg-white text-ink-soft'
+              key={c.id}
+              onClick={() => setFilter(c.id)}
+              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold ${
+                filter === c.id ? 'bg-ink text-white' : 'border border-line bg-white text-ink-soft'
               }`}
             >
-              {c === 'all' ? 'All areas' : AREA_CATEGORY_LABELS[c]}
+              {c.color && <span className="h-2 w-2 rounded-full" style={{ background: c.color }} />}
+              {c.name}
             </button>
           ))}
         </div>
@@ -210,7 +238,10 @@ export function Locations() {
                   </div>
                   <div className="font-mono text-xs text-muted">{area.code}</div>
                 </div>
-                <div className="text-sm text-ink-soft">{AREA_CATEGORY_LABELS[area.category]}</div>
+                <div className="flex items-center gap-1.5 text-sm text-ink-soft">
+                  {categoryColor(area) && <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: categoryColor(area)! }} />}
+                  {categoryLabel(area)}
+                </div>
                 {canEdit ? (
                   <select
                     value={area.frequencyMinutes ?? 'null'}
@@ -291,13 +322,33 @@ export function Locations() {
           siteId={admin.siteId}
           branches={branches}
           defaultBranchId={targetBranchId}
+          categories={activeCategories}
+          canManageCategories={canManageCats}
+          onCategoryCreated={(c) => setCategories((prev) => [...prev, c])}
           onClose={() => setAddOpen(false)}
           onCreated={(a) => { upsertArea(a); setAddOpen(false) }}
         />
       )}
 
       {editArea && (
-        <EditAreaModal area={editArea} onClose={() => setEditArea(null)} onSaved={(a) => { upsertArea(a); setEditArea(null) }} />
+        <EditAreaModal
+          area={editArea}
+          categories={activeCategories}
+          onClose={() => setEditArea(null)}
+          onSaved={(a) => { upsertArea(a); setEditArea(null) }}
+        />
+      )}
+
+      {manageCatsOpen && admin && (
+        <ManageCategoriesModal
+          siteId={admin.siteId}
+          branches={branches}
+          categories={categories}
+          areas={areas}
+          onClose={() => setManageCatsOpen(false)}
+          onChanged={(cats) => setCategories(cats)}
+          onAreasChanged={() => repo.listAreasForSite(admin.siteId).then(setAreas)}
+        />
       )}
 
       {deleteTarget && (
@@ -567,22 +618,131 @@ function TaskListEditor({ tasks, onChange }: { tasks: string[]; onChange: (tasks
   )
 }
 
+/** Category dropdown with an inline "+" that opens a small new-category form (superuser/manage only).
+ * On save the new category is added to the list and auto-selected. Shared by the area modals. */
+function CategoryPicker({
+  siteId,
+  categories,
+  value,
+  onChange,
+  canManage,
+  onCategoryCreated,
+  branchId,
+}: {
+  siteId: string
+  categories: LocationCategory[]
+  value: string | null
+  onChange: (categoryId: string) => void
+  canManage: boolean
+  onCategoryCreated?: (c: LocationCategory) => void
+  branchId: string
+}) {
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newColor, setNewColor] = useState('#35668C')
+  const [newIcon, setNewIcon] = useState('')
+  const [scope, setScope] = useState<'global' | 'branch'>('global')
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function saveCategory() {
+    if (!newName.trim() || busy) return
+    setErr(null)
+    setBusy(true)
+    try {
+      const created = await repo.createCategory(siteId, {
+        name: newName.trim(),
+        color: newColor,
+        icon: newIcon.trim() || null,
+        isGlobal: scope === 'global',
+        branchId: scope === 'branch' ? branchId : null,
+      })
+      onCategoryCreated?.(created)
+      onChange(created.id)
+      setAdding(false)
+      setNewName('')
+      setNewIcon('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create the category.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <select value={value ?? ''} onChange={(e) => onChange(e.target.value)} className={inputCls}>
+          {value === null && <option value="">Select a category</option>}
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => setAdding((v) => !v)}
+            title="New category"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-line text-ink-soft"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        )}
+      </div>
+      {adding && (
+        <div className="mt-2 rounded-xl border border-line bg-app p-3">
+          <div className="mb-1.5 text-xs font-bold text-ink-soft">New category</div>
+          <div className="flex flex-col gap-2">
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} className={inputCls} placeholder="Category name (e.g. Isolation Ward)" />
+            <div className="flex items-center gap-2">
+              <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="h-9 w-12 rounded-lg border border-line" title="Color" />
+              <input value={newIcon} onChange={(e) => setNewIcon(e.target.value)} className={`${inputCls} flex-1`} placeholder="Icon (optional, e.g. 🧴)" />
+              <select value={scope} onChange={(e) => setScope(e.target.value as 'global' | 'branch')} className={inputCls}>
+                <option value="global">All branches</option>
+                <option value="branch">This branch</option>
+              </select>
+            </div>
+            {err && <div className="text-[12px] font-medium text-overdue">{err}</div>}
+            <div className="flex gap-2">
+              <button type="button" onClick={saveCategory} disabled={busy || !newName.trim()} className="h-9 flex-1 rounded-lg bg-verified text-xs font-bold text-white disabled:opacity-50">
+                {busy ? 'Saving…' : 'Save category'}
+              </button>
+              <button type="button" onClick={() => { setAdding(false); setErr(null) }} className="h-9 flex-1 rounded-lg border border-stroke text-xs font-bold text-ink">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AddAreaModal({
   siteId,
   branches,
   defaultBranchId,
+  categories,
+  canManageCategories,
+  onCategoryCreated,
   onClose,
   onCreated,
 }: {
   siteId: string
   branches: Branch[]
   defaultBranchId: string
+  categories: LocationCategory[]
+  canManageCategories: boolean
+  onCategoryCreated: (c: LocationCategory) => void
   onClose: () => void
   onCreated: (area: Area) => void
 }) {
   const [name, setName] = useState('')
   const [branchId, setBranchId] = useState(defaultBranchId)
-  const [category, setCategory] = useState<AreaCategory>('office')
+  const [localCategories, setLocalCategories] = useState<LocationCategory[]>(categories)
+  const [categoryId, setCategoryId] = useState<string | null>(
+    categories.find((c) => c.slug === 'office')?.id ?? categories[0]?.id ?? null,
+  )
   const [frequencyMinutes, setFrequencyMinutes] = useState<number | null>(null)
   const [tasks, setTasks] = useState<string[]>(['Wipe & disinfect surfaces', 'Empty & reline bins'])
   const [error, setError] = useState<string | null>(null)
@@ -595,11 +755,17 @@ function AddAreaModal({
       setError('Choose a branch for this area.')
       return
     }
+    if (!categoryId) {
+      setError('Choose a category for this area.')
+      return
+    }
+    const category = localCategories.find((c) => c.id === categoryId)
     setSubmitting(true)
     try {
       const input: CreateAreaInput = {
         name: name.trim(),
-        category,
+        category: category?.slug ?? 'other',
+        categoryId,
         frequencyMinutes,
         taskTemplate: tasks.map((t) => t.trim()).filter(Boolean),
         branchId,
@@ -626,13 +792,15 @@ function AddAreaModal({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category">
-            <select value={category} onChange={(e) => setCategory(e.target.value as AreaCategory)} className={inputCls}>
-              {(['bathroom', 'office', 'common', 'kitchen', 'outdoor', 'other'] as AreaCategory[]).map((c) => (
-                <option key={c} value={c}>
-                  {AREA_CATEGORY_LABELS[c]}
-                </option>
-              ))}
-            </select>
+            <CategoryPicker
+              siteId={siteId}
+              categories={localCategories}
+              value={categoryId}
+              onChange={setCategoryId}
+              canManage={canManageCategories}
+              branchId={branchId}
+              onCategoryCreated={(c) => { setLocalCategories((prev) => [...prev, c]); onCategoryCreated(c) }}
+            />
           </Field>
           <Field label="Frequency">
             <select
@@ -667,28 +835,42 @@ function AddAreaModal({
 
 function EditAreaModal({
   area,
+  categories,
   onClose,
   onSaved,
 }: {
   area: Area
+  categories: LocationCategory[]
   onClose: () => void
   onSaved: (area: Area) => void
 }) {
   const [name, setName] = useState(area.name)
-  const [category, setCategory] = useState<AreaCategory>(area.category)
+  const [categoryId, setCategoryId] = useState<string | null>(area.categoryId ?? categories.find((c) => c.slug === area.category)?.id ?? null)
   const [tasks, setTasks] = useState<string[]>(area.taskTemplate)
   const [active, setActive] = useState(area.active)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  // Include the area's current category even if it was archived, so the label doesn't vanish.
+  const options = useMemo(() => {
+    const list = [...categories]
+    if (area.categoryId && !list.some((c) => c.id === area.categoryId)) {
+      const stray = categories.find((c) => c.id === area.categoryId)
+      if (stray) list.push(stray)
+    }
+    return list
+  }, [categories, area.categoryId])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
     try {
+      const category = options.find((c) => c.id === categoryId)
       const patch: UpdateAreaInput = {
         name: name.trim(),
-        category,
+        category: category?.slug ?? area.category,
+        categoryId: categoryId ?? undefined,
         taskTemplate: tasks.map((t) => t.trim()).filter(Boolean),
         active,
       }
@@ -709,12 +891,8 @@ function EditAreaModal({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category">
-            <select value={category} onChange={(e) => setCategory(e.target.value as AreaCategory)} className={inputCls}>
-              {(['bathroom', 'office', 'common', 'kitchen', 'outdoor', 'other'] as AreaCategory[]).map((c) => (
-                <option key={c} value={c}>
-                  {AREA_CATEGORY_LABELS[c]}
-                </option>
-              ))}
+            <select value={categoryId ?? ''} onChange={(e) => setCategoryId(e.target.value || null)} className={inputCls}>
+              {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Field>
           <Field label="Status">

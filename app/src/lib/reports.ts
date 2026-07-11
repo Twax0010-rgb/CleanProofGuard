@@ -1,4 +1,4 @@
-import { AREA_CATEGORY_LABELS, AUDIT_ACTION_LABELS, effectiveStatus, formatClock, formatFrequency, ISSUE_SEVERITY_LABELS, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, taskProgress } from './domain'
+import { AUDIT_ACTION_LABELS, categorySlugLabel, effectiveStatus, formatClock, formatFrequency, ISSUE_SEVERITY_LABELS, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, taskProgress } from './domain'
 import type { Area, Assignment, AuditLogEntry, Issue, ReportType, Staff } from './types'
 
 // --- Date ranges -------------------------------------------------------
@@ -286,7 +286,7 @@ export function buildReportRows(type: ReportType, ctx: ReportContext, range: Dat
             onTime: onTime ? 'Yes' : 'No',
             areaName: a.areaName,
             areaCode: a.areaCode,
-            category: area ? AREA_CATEGORY_LABELS[area.category] : '',
+            category: area ? categorySlugLabel(area.category) : '',
             staffName: staffMember?.fullName ?? '—',
             staffCode: staffMember?.staffCode ?? '',
             taskType: TASK_TYPE_LABELS[a.taskType],
@@ -342,7 +342,7 @@ export function buildReportRows(type: ReportType, ctx: ReportContext, range: Dat
         return {
           areaName: a.name,
           areaCode: a.code,
-          category: AREA_CATEGORY_LABELS[a.category],
+          category: categorySlugLabel(a.category),
           frequency: formatFrequency(a.frequencyMinutes),
           status: a.active ? 'Active' : 'Inactive',
           lastCleanedAt: formatClock(a.lastCleanedAt),

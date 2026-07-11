@@ -1,7 +1,26 @@
 import { placeholderPhoto } from '../domain'
-import type { AdminUser, Area, AreaCategory, Assignment, AuditLogEntry, Branch, ChecklistTask, ImportBatch, Issue, ProofPhoto, ReportTemplate, Site, Staff, TaskTemplate } from '../types'
+import type { AdminUser, Area, AreaCategory, Assignment, AuditLogEntry, Branch, ChecklistTask, ImportBatch, Issue, LocationCategory, ProofPhoto, ReportTemplate, Site, Staff, TaskTemplate } from '../types'
 
 export const SITE_ID = 'site-northgate'
+
+/** Default global categories seeded on the demo site. Ids are stable so seed areas can link. */
+const DEFAULT_CATEGORIES: Array<{ slug: string; name: string; color: string }> = [
+  { slug: 'bathroom', name: 'Bathroom', color: '#35668C' },
+  { slug: 'kitchen', name: 'Kitchen', color: '#B27A0F' },
+  { slug: 'office', name: 'Office', color: '#5E6B76' },
+  { slug: 'common', name: 'Common area', color: '#216B4B' },
+  { slug: 'outdoor', name: 'Outdoor', color: '#2E86AB' },
+  { slug: 'other', name: 'Other', color: '#8E44AD' },
+  { slug: 'ward', name: 'Ward', color: '#B3261E' },
+  { slug: 'theatre', name: 'Theatre', color: '#7D3C98' },
+  { slug: 'icu', name: 'ICU', color: '#C0392B' },
+  { slug: 'reception', name: 'Reception', color: '#1F8A70' },
+  { slug: 'storage', name: 'Storage', color: '#6D4C41' },
+  { slug: 'parking', name: 'Parking', color: '#455A64' },
+]
+export const CATEGORY_ID_BY_SLUG: Record<string, string> = Object.fromEntries(
+  DEFAULT_CATEGORIES.map((c) => [c.slug, `cat-${c.slug}`]),
+)
 
 // Branch/facility ids. Northgate is the original single-site data; the two Gauteng hospitals
 // are the multi-branch examples from the spec.
@@ -78,6 +97,7 @@ export function buildSeed(): {
   staff: Staff[]
   admins: AdminUser[]
   areas: Area[]
+  categories: LocationCategory[]
   assignments: Assignment[]
   staffPins: Record<string, string>
   issues: Issue[]
@@ -463,6 +483,22 @@ export function buildSeed(): {
     { id: 'a-nw-5', branchId: BRANCH_NW, areaName: 'Parking · Entrance', areaCode: 'NWH-PK-005', category: 'outdoor', frequencyMinutes: null, staffId: null, sortOrder: 5, status: 'todo', dueOffsetMin: 90, tasks: tasksFrom(GENERIC_TASKS, () => false) },
   ]
 
+  const categories: LocationCategory[] = DEFAULT_CATEGORIES.map((c, i) => ({
+    id: CATEGORY_ID_BY_SLUG[c.slug],
+    siteId: site.id,
+    name: c.name,
+    slug: c.slug,
+    description: null,
+    icon: null,
+    color: c.color,
+    branchId: null,
+    isGlobal: true,
+    isActive: true,
+    sortOrder: (i + 1) * 10,
+    createdAt: minutesFromNow(-60 * 24 * 120),
+    archivedAt: null,
+  }))
+
   const areas: Area[] = specs.map((s) => {
     const lastCleanedOffsetMin = resolveLastCleanedOffsetMin(s)
     return {
@@ -472,6 +508,7 @@ export function buildSeed(): {
       name: s.areaName,
       code: s.areaCode,
       category: s.category,
+      categoryId: CATEGORY_ID_BY_SLUG[s.category] ?? null,
       frequencyMinutes: s.frequencyMinutes,
       taskTemplate: s.tasks.map((t) => t.label),
       lastCleanedAt: lastCleanedOffsetMin !== undefined ? minutesFromNow(lastCleanedOffsetMin) : null,
@@ -613,7 +650,7 @@ export function buildSeed(): {
     },
   ]
 
-  return { site, branches, staff, admins, areas, assignments, staffPins, issues, auditLog, reportTemplates, importBatches, taskTemplates }
+  return { site, branches, staff, admins, areas, categories, assignments, staffPins, issues, auditLog, reportTemplates, importBatches, taskTemplates }
 }
 
 /** Demo credentials, surfaced in the sign-in screens' helper text. */

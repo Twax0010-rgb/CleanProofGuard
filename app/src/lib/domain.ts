@@ -64,6 +64,13 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   permissions_updated: 'Updated permissions',
   photo_reviewed: 'Reviewed photo',
   photos_exported: 'Exported photos',
+  category_created: 'Created category',
+  category_updated: 'Edited category',
+  category_archived: 'Archived category',
+  category_restored: 'Restored category',
+  category_deleted: 'Deleted category',
+  area_category_changed: 'Changed area category',
+  category_reassigned: 'Reassigned category',
 }
 
 /** South Africa's nine provinces — offered as a dropdown so branch records never carry typos. */
@@ -106,6 +113,7 @@ export const ADMIN_FEATURE_LABELS: Record<AdminFeature, string> = {
   photos: 'Photos',
   liveMap: 'Live Map',
   users: 'Users & Access',
+  categories: 'Location Categories',
   settings: 'Settings',
 }
 
@@ -136,7 +144,7 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
 /** The full feature set, in nav order — used to render permission matrices. */
 export const ADMIN_FEATURES: AdminFeature[] = [
   'overview', 'assignments', 'createTask', 'taskTemplates', 'staff',
-  'locations', 'branches', 'reports', 'photos', 'liveMap', 'users', 'settings',
+  'locations', 'branches', 'reports', 'photos', 'liveMap', 'users', 'categories', 'settings',
 ]
 
 /**
@@ -150,24 +158,25 @@ const ROLE_PERMISSION_DEFAULTS: Record<AdminRole, PermissionOverrides> = {
     overview: { view: true }, assignments: { view: true, manage: true }, createTask: { view: true, manage: true },
     taskTemplates: { view: true, manage: true }, staff: { view: true, manage: true }, locations: { view: true, manage: true, export: true },
     branches: { view: true }, reports: { view: true, export: true }, photos: { view: true, export: true }, liveMap: { view: true },
-    users: { view: true }, settings: { view: true },
+    users: { view: true }, categories: { view: true }, settings: { view: true },
   },
   manager: {
     overview: { view: true }, assignments: { view: true, manage: true }, createTask: { view: true, manage: true },
     taskTemplates: { view: true }, staff: { view: true, manage: true }, locations: { view: true, manage: true, export: true },
     branches: { view: true }, reports: { view: true, export: true }, photos: { view: true }, liveMap: { view: true },
-    users: {}, settings: {},
+    // Managers can view/select categories but not manage them unless a superuser grants it.
+    users: {}, categories: { view: true }, settings: {},
   },
   supervisor: {
     overview: { view: true }, assignments: { view: true, manage: true }, createTask: { view: true, manage: true },
     taskTemplates: { view: true }, staff: { view: true }, locations: { view: true },
     branches: {}, reports: { view: true }, photos: { view: true }, liveMap: { view: true },
-    users: {}, settings: {},
+    users: {}, categories: { view: true }, settings: {},
   },
   read_only: {
     overview: { view: true }, assignments: { view: true }, createTask: {}, taskTemplates: {}, staff: { view: true },
     locations: { view: true }, branches: {}, reports: { view: true }, photos: { view: true }, liveMap: { view: true },
-    users: {}, settings: {},
+    users: {}, categories: { view: true }, settings: {},
   },
 }
 
@@ -257,6 +266,22 @@ export const AREA_CATEGORY_LABELS: Record<AreaCategory, string> = {
   kitchen: 'Kitchen',
   outdoor: 'Outdoor',
   other: 'Other',
+}
+
+/** Human label for a category slug: the built-in label if known, else Title-Cased from the slug.
+ * A fallback for rendering `Area.category` when the full LocationCategory isn't on hand. */
+export function categorySlugLabel(slug: string): string {
+  if (slug in AREA_CATEGORY_LABELS) return AREA_CATEGORY_LABELS[slug as AreaCategory]
+  return slug
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ') || 'Uncategorized'
+}
+
+/** Managing categories: superuser, or anyone granted the categories.manage override. */
+export function canManageCategories(admin: Pick<AdminUser, 'role' | 'permissions'>): boolean {
+  return admin.role === 'superuser' || hasPermission(admin, 'categories', 'manage')
 }
 
 /** Time remaining until an area's next clean is due, for areas on a recurring frequency. */

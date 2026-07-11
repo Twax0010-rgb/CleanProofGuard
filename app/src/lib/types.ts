@@ -71,6 +71,7 @@ export type AdminFeature =
   | 'photos'
   | 'liveMap'
   | 'users'
+  | 'categories'
   | 'settings'
 
 export type PermissionAction = 'view' | 'manage' | 'export'
@@ -109,7 +110,27 @@ export interface AdminUser {
 
 export type AssignmentStatus = 'todo' | 'in_progress' | 'done' | 'overdue'
 
+/** The built-in category slugs seeded on every site. Areas can also use custom category
+ * slugs created by admins, so `Area.category` is a free string — this union is only used
+ * for the default label lookup + import validation. */
 export type AreaCategory = 'bathroom' | 'office' | 'common' | 'kitchen' | 'outdoor' | 'other'
+
+/** An editable location category. Global (all-branch) or scoped to one branch. */
+export interface LocationCategory {
+  id: string
+  siteId: string
+  name: string
+  slug: string
+  description: string | null
+  icon: string | null
+  color: string | null
+  branchId: string | null
+  isGlobal: boolean
+  isActive: boolean
+  sortOrder: number
+  createdAt: string
+  archivedAt: string | null
+}
 
 export interface Area {
   id: string
@@ -117,7 +138,10 @@ export interface Area {
   branchId: string
   name: string
   code: string
-  category: AreaCategory
+  /** Denormalized category slug (kept for history + display fallback). The real link is categoryId. */
+  category: string
+  /** FK to the LocationCategory this area belongs to; null for legacy/unlinked areas. */
+  categoryId: string | null
   /** How often this area must be re-cleaned, in minutes. Null = no recurring schedule (one-off / manually assigned each time). */
   frequencyMinutes: number | null
   /** Checklist labels used whenever a new cleaning cycle is generated for this area. */
@@ -258,6 +282,13 @@ export type AuditAction =
   | 'permissions_updated'
   | 'photo_reviewed'
   | 'photos_exported'
+  | 'category_created'
+  | 'category_updated'
+  | 'category_archived'
+  | 'category_restored'
+  | 'category_deleted'
+  | 'area_category_changed'
+  | 'category_reassigned'
 
 /** A record of a privileged admin action, for accountability — who did what and when. */
 export interface AuditLogEntry {

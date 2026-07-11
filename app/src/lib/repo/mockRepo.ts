@@ -1,4 +1,4 @@
-import { allowedBranchIds, canAccessBranch, canManageAreas, canManageBranches, canManageRoutes, canManageTemplates, canManageUsers, canView, colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
+import { allowedBranchIds, canAccessBranch, canManageAreas, canManageBranches, canManageCategories, canManageRoutes, canManageTemplates, canManageUsers, canView, colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
 import type {
   AdminRole,
   AdminUser,
@@ -12,6 +12,7 @@ import type {
   ImportBatch,
   Issue,
   IssueSeverity,
+  LocationCategory,
   PhotoReviewStatus,
   ProofPhotoView,
   ReportTemplate,
@@ -22,7 +23,7 @@ import type {
 import { DEMO_ADMIN_PASSWORD, SITE_ID, buildSeed } from './seed'
 import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput } from './types'
 
-const STORAGE_KEY = 'cpg_mock_state_v15'
+const STORAGE_KEY = 'cpg_mock_state_v16'
 const MAX_STATE_AGE_MS = 12 * 60 * 60 * 1000 // reseed if the demo has gone stale (e.g. next day)
 
 interface PersistedState {
@@ -32,6 +33,7 @@ interface PersistedState {
   staff: Staff[]
   admins: AdminUser[]
   areas: Area[]
+  categories: LocationCategory[]
   assignments: Assignment[]
   /** Demo-only plaintext PIN store, keyed by staff id — Supabase mode always hashes via pgcrypto instead. */
   staffPins: Record<string, string>
@@ -613,6 +615,7 @@ export const mockRepo: DataRepo = {
       name: input.name,
       code,
       category: input.category,
+      categoryId: input.categoryId ?? state.categories.find((c) => c.slug === input.category)?.id ?? null,
       frequencyMinutes: input.frequencyMinutes,
       taskTemplate: input.taskTemplate,
       lastCleanedAt: null,
@@ -633,8 +636,13 @@ export const mockRepo: DataRepo = {
     if (!before) throw new Error(`Area not found: ${areaId}`)
     const updated = updateAreaRecord(areaId, (a) => ({ ...a, ...patch }))
     syncAssignmentsForActiveChange(before, updated)
-    const statusNote = patch.active === false ? 'deactivated' : patch.active === true ? 'reactivated' : null
-    logAction(updated.siteId, 'area_updated', updated.name, statusNote)
+    if (patch.categoryId !== undefined && patch.categoryId !== before.categoryId) {
+      const catName = state.categories.find((c) => c.id === updated.categoryId)?.name ?? updated.category
+      logAction(updated.siteId, 'area_category_changed', updated.name, catName)
+    } else {
+      const statusNote = patch.active === false ? 'deactivated' : patch.active === true ? 'reactivated' : null
+      logAction(updated.siteId, 'area_updated', updated.name, statusNote)
+    }
     persist()
     return delay(updated)
   },
@@ -655,6 +663,109 @@ export const mockRepo: DataRepo = {
     logAction(area.siteId, 'area_deleted', area.name, area.code)
     persist()
     return delay(undefined)
+  },
+
+  // ————— Location categories —————
+
+  async listCategories(siteId) {
+    return delay(state.categories.filter((c) => c.siteId === siteId).sort((a, b) => a.sortOrder - b.sortOrder))
+  },
+
+  async createCategory(siteId, input) {
+    const actor = requireAdmin((a) => canManageCategories(a), 'create categories')
+    const name = input.name.trim()
+    if (!name) throw new Error('A category name is required.')
+    const isGlobal = input.isGlobal
+    const branchId = isGlobal ? null : input.branchId ?? null
+    const clash = state.categories.some(
+      (c) => c.siteId === siteId && c.isGlobal === isGlobal && c.branchId === branchId && c.name.toLowerCase() === name.toLowerCase(),
+    )
+    if (clash) throw new Error(`A category named "${name}" already exists${isGlobal ? '' : ' in this branch'}.`)
+    const maxSort = Math.max(0, ...state.categories.filter((c) => c.siteId === siteId).map((c) => c.sortOrder))
+    const category: LocationCategory = {
+      id: uid('cat-new'),
+      siteId,
+      name,
+      slug: name.toLowerCase().replace(/\s+/g, '-'),
+      description: input.description?.trim() || null,
+      icon: input.icon?.trim() || null,
+      color: input.color?.trim() || null,
+      branchId,
+      isGlobal,
+      isActive: true,
+      sortOrder: maxSort + 10,
+      createdAt: new Date().toISOString(),
+      archivedAt: null,
+    }
+    state.categories = [...state.categories, category]
+    logAction(siteId, 'category_created', category.name, actor.name)
+    persist()
+    return delay(category)
+  },
+
+  async updateCategory(categoryId, patch) {
+    requireAdmin((a) => canManageCategories(a), 'edit categories')
+    const before = state.categories.find((c) => c.id === categoryId)
+    if (!before) throw new Error('Category not found')
+    if (patch.name) {
+      const name = patch.name.trim()
+      const clash = state.categories.some(
+        (c) => c.id !== categoryId && c.siteId === before.siteId && c.isGlobal === before.isGlobal && c.branchId === before.branchId && c.name.toLowerCase() === name.toLowerCase(),
+      )
+      if (clash) throw new Error(`A category named "${name}" already exists.`)
+    }
+    const updated: LocationCategory = {
+      ...before,
+      name: patch.name?.trim() || before.name,
+      slug: patch.name ? patch.name.trim().toLowerCase().replace(/\s+/g, '-') : before.slug,
+      description: patch.description !== undefined ? patch.description?.trim() || null : before.description,
+      icon: patch.icon !== undefined ? patch.icon?.trim() || null : before.icon,
+      color: patch.color !== undefined ? patch.color?.trim() || null : before.color,
+      sortOrder: patch.sortOrder ?? before.sortOrder,
+    }
+    state.categories = state.categories.map((c) => (c.id === categoryId ? updated : c))
+    logAction(before.siteId, 'category_updated', updated.name)
+    persist()
+    return delay(updated)
+  },
+
+  async setCategoryActive(categoryId, active) {
+    requireAdmin((a) => canManageCategories(a), 'change categories')
+    const before = state.categories.find((c) => c.id === categoryId)
+    if (!before) throw new Error('Category not found')
+    const updated: LocationCategory = { ...before, isActive: active, archivedAt: active ? null : new Date().toISOString() }
+    state.categories = state.categories.map((c) => (c.id === categoryId ? updated : c))
+    logAction(before.siteId, active ? 'category_restored' : 'category_archived', updated.name)
+    persist()
+    return delay(updated)
+  },
+
+  async deleteCategory(categoryId) {
+    requireAdmin((a) => canManageCategories(a), 'delete categories')
+    const cat = state.categories.find((c) => c.id === categoryId)
+    if (!cat) throw new Error('Category not found')
+    const uses = state.areas.filter((a) => a.categoryId === categoryId).length
+    if (uses > 0) throw new Error(`This category is used by ${uses} location${uses === 1 ? '' : 's'}. Reassign those locations before deleting.`)
+    state.categories = state.categories.filter((c) => c.id !== categoryId)
+    logAction(cat.siteId, 'category_deleted', cat.name)
+    persist()
+    return delay(undefined)
+  },
+
+  async reassignCategory(fromCategoryId, toCategoryId) {
+    requireAdmin((a) => canManageCategories(a), 'reassign categories')
+    const from = state.categories.find((c) => c.id === fromCategoryId)
+    const to = state.categories.find((c) => c.id === toCategoryId)
+    if (!from || !to) throw new Error('Category not found')
+    let count = 0
+    state.areas = state.areas.map((a) => {
+      if (a.categoryId !== fromCategoryId) return a
+      count += 1
+      return { ...a, categoryId: toCategoryId, category: to.slug }
+    })
+    logAction(from.siteId, 'category_reassigned', `${from.name} → ${to.name}`, `${count} location${count === 1 ? '' : 's'}`)
+    persist()
+    return delay(count)
   },
 
   async reportIssue(assignmentId, staffId, description, severity: IssueSeverity) {
@@ -760,6 +871,7 @@ export const mockRepo: DataRepo = {
           ...a,
           name: row.name,
           category: row.category,
+          categoryId: state.categories.find((c) => c.siteId === siteId && c.slug === row.category)?.id ?? a.categoryId,
           frequencyMinutes: row.frequencyMinutes,
           taskTemplate: row.taskTemplate,
           active: row.active,
@@ -773,6 +885,7 @@ export const mockRepo: DataRepo = {
           name: row.name,
           code: row.code,
           category: row.category,
+          categoryId: state.categories.find((c) => c.siteId === siteId && c.slug === row.category)?.id ?? null,
           frequencyMinutes: row.frequencyMinutes,
           taskTemplate: row.taskTemplate,
           lastCleanedAt: null,
