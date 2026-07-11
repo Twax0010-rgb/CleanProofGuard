@@ -68,7 +68,7 @@ export function StaffSignIn() {
             <input
               value={staffCode}
               onChange={(e) => setStaffCode(e.target.value.toUpperCase())}
-              placeholder="MB-4471"
+              placeholder="AB-1234"
               autoCapitalize="characters"
               className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 font-mono text-base text-white placeholder-white/35 outline-none focus:border-white/40"
               style={{ height: 52 }}
@@ -112,13 +112,13 @@ export function StaffSignIn() {
             </p>
           )}
           <InstallStaffApp dark />
-          <p className="mt-1 text-center font-mono text-[11px] text-white/45">
-            Demo: MB-4471 · PIN 1234
-          </p>
         </div>
 
         <div className="flex-1" />
         <div className="text-center font-mono text-xs text-white/50">v4.0 · Clean Proof Guard</div>
+        <div className="mt-2 text-center font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-white/50">
+          Powered by <span className="text-[#D8B75E]/80">Touchstone Facility Management Academy</span>
+        </div>
       </form>
     </PhoneScreen>
   )

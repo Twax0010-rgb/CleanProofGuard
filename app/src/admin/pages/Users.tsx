@@ -170,7 +170,7 @@ function AddAdminModal({ siteId, branches, onClose, onCreated }: { siteId: strin
       <form onSubmit={handleSubmit} className="flex max-h-[86vh] w-full max-w-md flex-col gap-3 overflow-auto rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <div>
           <div className="text-lg font-extrabold">Add dashboard user</div>
-          <div className="mt-0.5 text-sm text-ink-soft">They sign in at /admin/auth. Demo mode: the password is demo1234 for every account.</div>
+          <div className="mt-0.5 text-sm text-ink-soft">They sign in at /admin/auth.</div>
         </div>
         <Field label="Full name">
           <input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Lerato Molefe" />

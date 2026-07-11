@@ -45,7 +45,7 @@ export function AdminSignIn() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="sara@cleanproofguard.com"
+              placeholder="you@cleanproofguard.com"
               className="w-full rounded-xl border border-line bg-app px-3.5 py-3 text-sm outline-none focus:border-stroke-soft"
             />
           </div>
@@ -63,12 +63,8 @@ export function AdminSignIn() {
           <Button type="submit" fullWidth disabled={submitting || !email || !password} className="mt-1">
             {submitting ? 'Signing in…' : 'Sign in'}
           </Button>
-          <div className="text-center font-mono text-[11px] leading-relaxed text-muted">
-            <div>Demo (any, password demo1234):</div>
-            <div>owen@… — Superuser (all branches)</div>
-            <div>sara@… — Manager (both hospitals)</div>
-            <div>thabo@… — Manager (Southwest only)</div>
-            <div>renee@… — Supervisor · chris@… — Read-only</div>
+          <div className="mt-1 text-center font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-muted">
+            Powered by <span className="text-[#8A6D2A]">Touchstone Facility Management Academy</span>
           </div>
         </div>
       </form>

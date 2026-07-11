@@ -956,6 +956,15 @@ create policy "admins can read their own profile" on admin_profiles for select
   to authenticated
   using (id = auth.uid());
 
+-- Users & Access: superusers see and manage the whole admin directory at their
+-- site. current_admin_role() is SECURITY DEFINER, so these don't recurse.
+create policy "superusers can read all admin profiles" on admin_profiles for select
+  using (current_admin_role(site_id) = 'superuser');
+
+create policy "superusers can update admin profiles" on admin_profiles for update
+  using (current_admin_role(site_id) = 'superuser')
+  with check (current_admin_role(site_id) = 'superuser');
+
 -- Direct staff-table edits (name/contact/role/account status) require Manager+;
 -- shift-status changes go through set_staff_status() above instead, since that
 -- needs a lower bar (anyone but Read-only).

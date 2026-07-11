@@ -52,6 +52,9 @@ export function Landing() {
       <p className="mt-6 max-w-xs text-center font-mono text-[11px] leading-relaxed text-ink-soft/70">
         Scan any area tag in the building to check when it was last cleaned.
       </p>
+      <p className="mt-3 text-center font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-muted">
+        Powered by <span className="text-[#8A6D2A]">Touchstone Facility Management Academy</span>
+      </p>
     </div>
   )
 }

@@ -1,7 +1,29 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-11 later session, for the next session)
-**No task in progress.** Newest work — the system is now split into two clear entry points:
+## ⏸ Where we left off (2026-07-11 third session, for the next session)
+**No task in progress.** Newest work — security + branding pass on the logins, plus two real
+superusers:
+- **Demo credential hints removed** from the staff sign-in (`Demo: MB-4471 · PIN 1234` line,
+  placeholder now a non-account `AB-1234`), the admin sign-in (demo account list, placeholder now
+  `you@cleanproofguard.com`), and the Add-user modal's "password is demo1234" note. NOTE: the demo
+  accounts themselves still exist and still accept demo1234 / PIN 1234 in Supabase — disable or
+  re-password them before a real rollout.
+- **New superusers (all branches): Sikha Moyo (sikha@cleanproofguard.com) & Thando Ndhlovu
+  (thando@cleanproofguard.com)**, initial password shared in chat — not written here since this
+  repo is on GitHub; change it via Supabase dashboard → Authentication → Users after first login.
+  Also in the mock seed (storage key bumped to `cpg_mock_state_v14`);
+  mock mode still uses the shared demo1234 for all admins.
+- **"Powered by Touchstone Facility Management Academy"** footer line on staff sign-in, admin
+  sign-in, and the /welcome landing page (text-only, muted gold accent to match their logo).
+- **New Supabase migrations:** `touchstone_superusers` (auth users + admin_profiles rows) and
+  `superuser_admin_directory` (RLS: superusers can read/update ALL admin_profiles at their site —
+  before this, Users & Access showed only your own row in Supabase mode and access edits couldn't
+  save; `schema.sql` updated to match).
+- Verified in the browser against Supabase: thando@ signs in, Users & Access lists all 7 admins,
+  both logins + landing show the Touchstone line, no console errors. Build + lint clean.
+
+## Previous session (2026-07-11, second session)
+**No task in progress.** The system is split into two clear entry points:
 - **Admin website is the default**: `/` → `/admin` (login/dashboard). The old landing page moved to
   `/welcome`. Alias routes: `/admin/login`, `/admin/dashboard`, `/staff/login`, `/staff/app`. The
   admin sidebar has an "Open Staff App" preview link (new tab).

@@ -22,7 +22,7 @@ import type {
 import { DEMO_ADMIN_PASSWORD, SITE_ID, buildSeed } from './seed'
 import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateBranchInput, UpdateStaffInput } from './types'
 
-const STORAGE_KEY = 'cpg_mock_state_v13'
+const STORAGE_KEY = 'cpg_mock_state_v14'
 const MAX_STATE_AGE_MS = 12 * 60 * 60 * 1000 // reseed if the demo has gone stale (e.g. next day)
 
 interface PersistedState {
