@@ -32,10 +32,22 @@ build **Scheduled tasks core FIRST**. This session delivered that core; the rest
   leaves 2–4 pending (independent completion). A demo schedule "Morning restroom clean" is left in
   the live DB so you can see it on the board.
 
+**Benchmarks slice — DONE (2026-07-11 session 7b):** editable `cleaning_benchmarks` table
+(category, optional branch/area scope, cleans/day, interval, photo-required, is_global/is_active +
+archive) seeded with 7 global defaults (Bathroom 4, Kitchen 3, Office 1, Reception 2, Common 2,
+Ward 6, ICU 8). Superuser-gated RPCs (`admin_can_manage_benchmarks` = superuser OR the new
+`benchmarks.manage` permission override): create/update/set_active/delete (migrations
+`cleaning_benchmarks`, `cleaning_benchmark_rpcs`; schema.sql mirrored). New `benchmarks`
+AdminFeature. A **"Benchmarks" button on the Locations page** (next to Manage categories) opens
+`ManageBenchmarks.tsx` (view/search/add/edit cleans+photo/archive/restore/delete). The Schedule
+modal's benchmark banner now reads from the **live** table (static map removed) and **logs a
+`benchmark_overridden` audit** when a schedule's frequency differs from the benchmark. Mock seed
+bumped to `cpg_mock_state_v18`. Verified in browser: 7 benchmarks list; edited Bathroom 4→5 (persisted,
+reverted); Schedule modal shows the live value. Audit actions added: benchmark_created/updated/
+archived/restored/deleted/overridden.
+
 **Remaining from this spec (NOT built yet — next slices, in the user's stated priority order):**
-1. Benchmarks: editable `cleaning_benchmarks` table + Superuser management UI + override logging
-   (currently only a static benchmark hint in the modal).
-2. Schedules management page (Schedules tab under Assignments: view/edit/pause/archive/duplicate/
+1. Schedules management page (Schedules tab under Assignments: view/edit/pause/archive/duplicate/
    reassign; last-generated/next-generation/completion-rate).
 3. Daily occurrence regeneration (currently only "today" is generated at create time; needs a cron/
    edge function to roll schedules forward each day and mark missed occurrences).

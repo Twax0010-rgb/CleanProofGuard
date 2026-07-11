@@ -194,6 +194,29 @@ create table if not exists schedule_breaks (
   label text
 );
 
+-- Editable cleaning-frequency benchmarks per category (optionally branch/area scoped).
+-- Drive the recommendation shown when building a schedule for that category.
+create table if not exists cleaning_benchmarks (
+  id uuid primary key default gen_random_uuid(),
+  site_id uuid not null references sites(id) on delete cascade,
+  name text not null,
+  branch_id uuid references branches(id) on delete cascade,
+  category_id uuid references location_categories(id) on delete cascade,
+  area_id uuid references areas(id) on delete cascade,
+  required_cleans_per_day int not null default 1,
+  interval_minutes int,
+  checklist_template_id uuid,
+  photo_required boolean not null default false,
+  is_global boolean not null default true,
+  is_active boolean not null default true,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz,
+  archived_at timestamptz
+);
+create index if not exists cleaning_benchmarks_site_idx on cleaning_benchmarks (site_id);
+create index if not exists cleaning_benchmarks_cat_idx on cleaning_benchmarks (category_id);
+
 create table if not exists assignments (
   id uuid primary key default gen_random_uuid(),
   site_id uuid not null references sites(id) on delete cascade,
@@ -1103,6 +1126,82 @@ begin
 end;
 $$;
 grant execute on function create_schedule(uuid, text, uuid, uuid, uuid, text, text, int, int, text, text, uuid[], jsonb, text[], uuid, text, boolean, text, text, boolean, text, boolean) to authenticated;
+
+-- ————— Cleaning benchmarks (superuser, or benchmarks.manage grant) —————
+
+alter table cleaning_benchmarks enable row level security;
+create policy "admins read benchmarks at their site" on cleaning_benchmarks for select
+  to authenticated using (current_admin_role(site_id) is not null);
+
+create or replace function admin_can_manage_benchmarks(p_site_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from admin_profiles
+    where id = auth.uid() and account_status = 'active' and site_id = p_site_id
+      and (role = 'superuser' or coalesce((permissions->'benchmarks'->>'manage')::boolean, false))
+  )
+$$;
+
+create or replace function create_benchmark(
+  p_site_id uuid, p_name text, p_category_id uuid, p_branch_id uuid, p_area_id uuid,
+  p_required_cleans int, p_interval_minutes int, p_checklist_template_id uuid, p_photo_required boolean, p_is_global boolean
+)
+returns setof cleaning_benchmarks language plpgsql security definer set search_path = public as $$
+begin
+  if not admin_can_manage_benchmarks(p_site_id) then raise exception 'Not authorized to manage benchmarks'; end if;
+  return query
+  insert into cleaning_benchmarks (site_id, name, category_id, branch_id, area_id, required_cleans_per_day,
+    interval_minutes, checklist_template_id, photo_required, is_global, created_by)
+  values (p_site_id, trim(p_name), p_category_id, case when p_is_global then null else p_branch_id end, p_area_id,
+    greatest(1, coalesce(p_required_cleans,1)), p_interval_minutes, p_checklist_template_id,
+    coalesce(p_photo_required,false), coalesce(p_is_global,true), auth.uid())
+  returning *;
+end; $$;
+
+create or replace function update_benchmark(
+  p_id uuid, p_name text, p_required_cleans int, p_interval_minutes int, p_photo_required boolean, p_category_id uuid
+)
+returns setof cleaning_benchmarks language plpgsql security definer set search_path = public as $$
+declare v_site uuid;
+begin
+  select site_id into v_site from cleaning_benchmarks where id = p_id;
+  if v_site is null or not admin_can_manage_benchmarks(v_site) then raise exception 'Not authorized to edit benchmarks'; end if;
+  return query
+  update cleaning_benchmarks set
+    name = coalesce(nullif(trim(p_name),''), name),
+    required_cleans_per_day = coalesce(p_required_cleans, required_cleans_per_day),
+    interval_minutes = coalesce(p_interval_minutes, interval_minutes),
+    photo_required = coalesce(p_photo_required, photo_required),
+    category_id = coalesce(p_category_id, category_id), updated_at = now()
+  where id = p_id returning *;
+end; $$;
+
+create or replace function set_benchmark_active(p_id uuid, p_active boolean)
+returns setof cleaning_benchmarks language plpgsql security definer set search_path = public as $$
+declare v_site uuid;
+begin
+  select site_id into v_site from cleaning_benchmarks where id = p_id;
+  if v_site is null or not admin_can_manage_benchmarks(v_site) then raise exception 'Not authorized to change benchmarks'; end if;
+  return query
+  update cleaning_benchmarks set is_active = p_active,
+    archived_at = case when p_active then null else now() end, updated_at = now()
+  where id = p_id returning *;
+end; $$;
+
+create or replace function delete_benchmark(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_site uuid;
+begin
+  select site_id into v_site from cleaning_benchmarks where id = p_id;
+  if v_site is null or not admin_can_manage_benchmarks(v_site) then raise exception 'Not authorized to delete benchmarks'; end if;
+  delete from cleaning_benchmarks where id = p_id;
+end; $$;
+
+grant execute on function admin_can_manage_benchmarks(uuid) to authenticated;
+grant execute on function create_benchmark(uuid, text, uuid, uuid, uuid, int, int, uuid, boolean, boolean) to authenticated;
+grant execute on function update_benchmark(uuid, text, int, int, boolean, uuid) to authenticated;
+grant execute on function set_benchmark_active(uuid, boolean) to authenticated;
+grant execute on function delete_benchmark(uuid) to authenticated;
 
 -- Edit a not-yet-completed task's type/priority/due date. Null args leave a field unchanged;
 -- p_clear_due=true explicitly nulls the due date (distinct from "leave it alone").

@@ -1,5 +1,5 @@
 import { placeholderPhoto } from '../domain'
-import type { AdminUser, Area, AreaCategory, Assignment, AuditLogEntry, Branch, ChecklistTask, ImportBatch, Issue, LocationCategory, ProofPhoto, ReportTemplate, Site, Staff, TaskTemplate } from '../types'
+import type { AdminUser, Area, AreaCategory, Assignment, AuditLogEntry, Benchmark, Branch, ChecklistTask, ImportBatch, Issue, LocationCategory, ProofPhoto, ReportTemplate, Site, Staff, TaskTemplate } from '../types'
 
 export const SITE_ID = 'site-northgate'
 
@@ -98,6 +98,7 @@ export function buildSeed(): {
   admins: AdminUser[]
   areas: Area[]
   categories: LocationCategory[]
+  benchmarks: Benchmark[]
   assignments: Assignment[]
   staffPins: Record<string, string>
   issues: Issue[]
@@ -499,6 +500,27 @@ export function buildSeed(): {
     archivedAt: null,
   }))
 
+  const benchmarks: Benchmark[] = (
+    [
+      ['bathroom', 4, true], ['kitchen', 3, false], ['office', 1, false], ['reception', 2, false],
+      ['ward', 6, true], ['icu', 8, true], ['common', 2, false],
+    ] as Array<[string, number, boolean]>
+  ).map(([slug, cleans, photo], i) => ({
+    id: `bench-${slug}`,
+    siteId: site.id,
+    name: `${categories.find((c) => c.slug === slug)?.name ?? slug} benchmark`,
+    branchId: null,
+    categoryId: CATEGORY_ID_BY_SLUG[slug] ?? null,
+    areaId: null,
+    requiredCleansPerDay: cleans,
+    intervalMinutes: null,
+    photoRequired: photo,
+    isGlobal: true,
+    isActive: true,
+    createdAt: minutesFromNow(-60 * 24 * 110 - i),
+    archivedAt: null,
+  }))
+
   const areas: Area[] = specs.map((s) => {
     const lastCleanedOffsetMin = resolveLastCleanedOffsetMin(s)
     return {
@@ -653,7 +675,7 @@ export function buildSeed(): {
     },
   ]
 
-  return { site, branches, staff, admins, areas, categories, assignments, staffPins, issues, auditLog, reportTemplates, importBatches, taskTemplates }
+  return { site, branches, staff, admins, areas, categories, benchmarks, assignments, staffPins, issues, auditLog, reportTemplates, importBatches, taskTemplates }
 }
 
 /** Demo credentials, surfaced in the sign-in screens' helper text. */

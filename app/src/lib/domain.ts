@@ -76,6 +76,12 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   schedule_paused: 'Paused schedule',
   schedule_archived: 'Archived schedule',
   schedule_restored: 'Restored schedule',
+  benchmark_created: 'Created benchmark',
+  benchmark_updated: 'Edited benchmark',
+  benchmark_archived: 'Archived benchmark',
+  benchmark_restored: 'Restored benchmark',
+  benchmark_deleted: 'Deleted benchmark',
+  benchmark_overridden: 'Overrode benchmark',
 }
 
 /** South Africa's nine provinces — offered as a dropdown so branch records never carry typos. */
@@ -119,6 +125,7 @@ export const ADMIN_FEATURE_LABELS: Record<AdminFeature, string> = {
   liveMap: 'Live Map',
   users: 'Users & Access',
   categories: 'Location Categories',
+  benchmarks: 'Cleaning Benchmarks',
   settings: 'Settings',
 }
 
@@ -149,7 +156,7 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
 /** The full feature set, in nav order — used to render permission matrices. */
 export const ADMIN_FEATURES: AdminFeature[] = [
   'overview', 'assignments', 'createTask', 'taskTemplates', 'staff',
-  'locations', 'branches', 'reports', 'photos', 'liveMap', 'users', 'categories', 'settings',
+  'locations', 'branches', 'reports', 'photos', 'liveMap', 'users', 'categories', 'benchmarks', 'settings',
 ]
 
 /**
@@ -163,25 +170,25 @@ const ROLE_PERMISSION_DEFAULTS: Record<AdminRole, PermissionOverrides> = {
     overview: { view: true }, assignments: { view: true, manage: true }, createTask: { view: true, manage: true },
     taskTemplates: { view: true, manage: true }, staff: { view: true, manage: true }, locations: { view: true, manage: true, export: true },
     branches: { view: true }, reports: { view: true, export: true }, photos: { view: true, export: true }, liveMap: { view: true },
-    users: { view: true }, categories: { view: true }, settings: { view: true },
+    users: { view: true }, categories: { view: true }, benchmarks: { view: true }, settings: { view: true },
   },
   manager: {
     overview: { view: true }, assignments: { view: true, manage: true }, createTask: { view: true, manage: true },
     taskTemplates: { view: true }, staff: { view: true, manage: true }, locations: { view: true, manage: true, export: true },
     branches: { view: true }, reports: { view: true, export: true }, photos: { view: true }, liveMap: { view: true },
     // Managers can view/select categories but not manage them unless a superuser grants it.
-    users: {}, categories: { view: true }, settings: {},
+    users: {}, categories: { view: true }, benchmarks: { view: true }, settings: {},
   },
   supervisor: {
     overview: { view: true }, assignments: { view: true, manage: true }, createTask: { view: true, manage: true },
     taskTemplates: { view: true }, staff: { view: true }, locations: { view: true },
     branches: {}, reports: { view: true }, photos: { view: true }, liveMap: { view: true },
-    users: {}, categories: { view: true }, settings: {},
+    users: {}, categories: { view: true }, benchmarks: { view: true }, settings: {},
   },
   read_only: {
     overview: { view: true }, assignments: { view: true }, createTask: {}, taskTemplates: {}, staff: { view: true },
     locations: { view: true }, branches: {}, reports: { view: true }, photos: { view: true }, liveMap: { view: true },
-    users: {}, categories: { view: true }, settings: {},
+    users: {}, categories: { view: true }, benchmarks: { view: true }, settings: {},
   },
 }
 
@@ -287,6 +294,11 @@ export function categorySlugLabel(slug: string): string {
 /** Managing categories: superuser, or anyone granted the categories.manage override. */
 export function canManageCategories(admin: Pick<AdminUser, 'role' | 'permissions'>): boolean {
   return admin.role === 'superuser' || hasPermission(admin, 'categories', 'manage')
+}
+
+/** Managing benchmarks: superuser, or anyone granted the benchmarks.manage override. */
+export function canManageBenchmarks(admin: Pick<AdminUser, 'role' | 'permissions'>): boolean {
+  return admin.role === 'superuser' || hasPermission(admin, 'benchmarks', 'manage')
 }
 
 /** Time remaining until an area's next clean is due, for areas on a recurring frequency. */

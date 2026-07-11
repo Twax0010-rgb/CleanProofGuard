@@ -1,4 +1,4 @@
-import { allowedBranchIds, canAccessBranch, canManageAreas, canManageBranches, canManageCategories, canManageRoutes, canManageTemplates, canManageUsers, canView, colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
+import { allowedBranchIds, canAccessBranch, canManageAreas, canManageBenchmarks, canManageBranches, canManageCategories, canManageRoutes, canManageTemplates, canManageUsers, canView, colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
 import type {
   AdminRole,
   AdminUser,
@@ -8,6 +8,7 @@ import type {
   AuditLogEntry,
   Branch,
   BranchStatus,
+  Benchmark,
   ChecklistTask,
   ImportBatch,
   Issue,
@@ -21,9 +22,9 @@ import type {
   TaskTemplate,
 } from '../types'
 import { DEMO_ADMIN_PASSWORD, SITE_ID, buildSeed } from './seed'
-import type { CreateAdminInput, CreateBranchInput, CreateScheduleInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput } from './types'
+import type { CreateAdminInput, CreateBenchmarkInput, CreateBranchInput, CreateScheduleInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBenchmarkInput, UpdateBranchInput, UpdateStaffInput } from './types'
 
-const STORAGE_KEY = 'cpg_mock_state_v17'
+const STORAGE_KEY = 'cpg_mock_state_v18'
 const MAX_STATE_AGE_MS = 12 * 60 * 60 * 1000 // reseed if the demo has gone stale (e.g. next day)
 
 interface PersistedState {
@@ -34,6 +35,7 @@ interface PersistedState {
   admins: AdminUser[]
   areas: Area[]
   categories: LocationCategory[]
+  benchmarks: Benchmark[]
   assignments: Assignment[]
   /** Demo-only plaintext PIN store, keyed by staff id — Supabase mode always hashes via pgcrypto instead. */
   staffPins: Record<string, string>
@@ -769,6 +771,80 @@ export const mockRepo: DataRepo = {
     logAction(from.siteId, 'category_reassigned', `${from.name} → ${to.name}`, `${count} location${count === 1 ? '' : 's'}`)
     persist()
     return delay(count)
+  },
+
+  // ————— Cleaning benchmarks —————
+
+  async listBenchmarks(siteId) {
+    return delay((state.benchmarks ?? []).filter((b) => b.siteId === siteId))
+  },
+
+  async createBenchmark(siteId, input: CreateBenchmarkInput) {
+    requireAdmin((a) => canManageBenchmarks(a), 'manage benchmarks')
+    const benchmark: Benchmark = {
+      id: uid('bench-new'),
+      siteId,
+      name: input.name.trim(),
+      branchId: input.isGlobal ? null : input.branchId ?? null,
+      categoryId: input.categoryId,
+      areaId: input.areaId ?? null,
+      requiredCleansPerDay: Math.max(1, input.requiredCleansPerDay),
+      intervalMinutes: input.intervalMinutes ?? null,
+      photoRequired: input.photoRequired,
+      isGlobal: input.isGlobal,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      archivedAt: null,
+    }
+    state.benchmarks = [...(state.benchmarks ?? []), benchmark]
+    logAction(siteId, 'benchmark_created', benchmark.name, `${benchmark.requiredCleansPerDay}×/day`)
+    persist()
+    return delay(benchmark)
+  },
+
+  async updateBenchmark(benchmarkId, patch: UpdateBenchmarkInput) {
+    requireAdmin((a) => canManageBenchmarks(a), 'edit benchmarks')
+    const before = (state.benchmarks ?? []).find((b) => b.id === benchmarkId)
+    if (!before) throw new Error('Benchmark not found')
+    const updated: Benchmark = {
+      ...before,
+      name: patch.name?.trim() || before.name,
+      requiredCleansPerDay: patch.requiredCleansPerDay ?? before.requiredCleansPerDay,
+      intervalMinutes: patch.intervalMinutes !== undefined ? patch.intervalMinutes : before.intervalMinutes,
+      photoRequired: patch.photoRequired ?? before.photoRequired,
+      categoryId: patch.categoryId !== undefined ? patch.categoryId : before.categoryId,
+    }
+    state.benchmarks = state.benchmarks.map((b) => (b.id === benchmarkId ? updated : b))
+    logAction(before.siteId, 'benchmark_updated', updated.name)
+    persist()
+    return delay(updated)
+  },
+
+  async setBenchmarkActive(benchmarkId, active) {
+    requireAdmin((a) => canManageBenchmarks(a), 'change benchmarks')
+    const before = (state.benchmarks ?? []).find((b) => b.id === benchmarkId)
+    if (!before) throw new Error('Benchmark not found')
+    const updated: Benchmark = { ...before, isActive: active, archivedAt: active ? null : new Date().toISOString() }
+    state.benchmarks = state.benchmarks.map((b) => (b.id === benchmarkId ? updated : b))
+    logAction(before.siteId, active ? 'benchmark_restored' : 'benchmark_archived', updated.name)
+    persist()
+    return delay(updated)
+  },
+
+  async deleteBenchmark(benchmarkId) {
+    requireAdmin((a) => canManageBenchmarks(a), 'delete benchmarks')
+    const b = (state.benchmarks ?? []).find((x) => x.id === benchmarkId)
+    if (!b) throw new Error('Benchmark not found')
+    state.benchmarks = state.benchmarks.filter((x) => x.id !== benchmarkId)
+    logAction(b.siteId, 'benchmark_deleted', b.name)
+    persist()
+    return delay(undefined)
+  },
+
+  async logBenchmarkOverride(siteId, detail) {
+    logAction(siteId, 'benchmark_overridden', detail)
+    persist()
+    return delay(undefined)
   },
 
   async reportIssue(assignmentId, staffId, description, severity: IssueSeverity) {

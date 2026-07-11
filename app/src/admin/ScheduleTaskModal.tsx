@@ -2,20 +2,9 @@ import { useMemo, useState } from 'react'
 import { Field, inputCls, ModalShell } from '../components/ui/Modal'
 import { repo } from '../lib/repo'
 import type { CreateScheduleInput, ScheduleBreakInput } from '../lib/repo/types'
-import type { Area, Assignment, Branch, LocationCategory, Staff, TaskTemplate } from '../lib/types'
+import type { Area, Assignment, Benchmark, Branch, LocationCategory, Staff, TaskTemplate } from '../lib/types'
 
 const UNASSIGNED = '__unassigned__'
-
-/** Rough benchmark hints per built-in category (the full editable benchmark system is a later slice). */
-const BENCHMARK_BY_SLUG: Record<string, { cleans: number; label: string }> = {
-  bathroom: { cleans: 4, label: 'Restrooms should be cleaned 4× per day' },
-  kitchen: { cleans: 3, label: 'Kitchens should be cleaned 3× per day' },
-  office: { cleans: 1, label: 'Offices should be cleaned once per day' },
-  reception: { cleans: 2, label: 'Reception should be cleaned 2× per day' },
-  ward: { cleans: 6, label: 'Wards should be cleaned 6× per day' },
-  icu: { cleans: 8, label: 'ICU/critical areas need a high frequency (8× per day)' },
-  common: { cleans: 2, label: 'Common areas should be cleaned 2× per day' },
-}
 
 type Frequency = 'once' | 'twice' | 'every_2h' | 'every_4h' | 'custom'
 
@@ -31,6 +20,7 @@ export function ScheduleTaskModal({
   defaultBranchId,
   areas,
   categories,
+  benchmarks,
   staff,
   templates,
   onClose,
@@ -42,6 +32,7 @@ export function ScheduleTaskModal({
   defaultBranchId: string
   areas: Area[]
   categories: LocationCategory[]
+  benchmarks: Benchmark[]
   staff: Staff[]
   templates: TaskTemplate[]
   onClose: () => void
@@ -89,11 +80,15 @@ export function ScheduleTaskModal({
       .filter((a) => !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q))
   }, [branchAreas, categoryId, floor, search])
 
+  // The most specific active benchmark for the chosen category: branch-specific beats global.
   const benchmark = useMemo(() => {
     if (categoryId === 'all') return null
-    const slug = categories.find((c) => c.id === categoryId)?.slug ?? ''
-    return BENCHMARK_BY_SLUG[slug] ?? null
-  }, [categoryId, categories])
+    const matches = benchmarks.filter((b) => b.isActive && b.categoryId === categoryId && (b.isGlobal || b.branchId === branchId))
+    if (matches.length === 0) return null
+    const best = matches.find((b) => !b.isGlobal && b.branchId === branchId) ?? matches[0]
+    const catName = categories.find((c) => c.id === categoryId)?.name ?? 'This category'
+    return { cleans: best.requiredCleansPerDay, label: `${catName} should be cleaned ${best.requiredCleansPerDay}× per day`, photo: best.photoRequired }
+  }, [categoryId, benchmarks, branchId, categories])
 
   const requiredCleans = useMemo(() => {
     const windowHours = Math.max(1, timeToHours(endTime) - timeToHours(startTime))
@@ -149,6 +144,11 @@ export function ScheduleTaskModal({
         generateToday: generate,
       }
       const created = await repo.createSchedule(siteId, input, createdByName)
+      // Log an override if the admin scheduled a different frequency than the category benchmark.
+      if (benchmark && requiredCleans !== benchmark.cleans) {
+        const catName = categories.find((c) => c.id === (categoryId === 'all' ? '' : categoryId))?.name ?? 'category'
+        await repo.logBenchmarkOverride(siteId, `${name.trim()}: ${requiredCleans}×/day vs ${catName} benchmark ${benchmark.cleans}×/day`)
+      }
       onCreated(created)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the schedule.')
@@ -184,7 +184,7 @@ export function ScheduleTaskModal({
             <span className="flex-1">{benchmark.label}.</span>
             <button
               type="button"
-              onClick={() => { setFrequency('custom'); setCustomCleans(benchmark.cleans) }}
+              onClick={() => { setFrequency('custom'); setCustomCleans(benchmark.cleans); if (benchmark.photo) setRequirePhoto(true) }}
               className="rounded-lg bg-info px-2.5 py-1 text-[11px] font-bold text-white"
             >
               Use {benchmark.cleans}×/day

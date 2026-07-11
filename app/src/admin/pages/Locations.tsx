@@ -4,7 +4,7 @@ import { QrModal } from '../../components/QrModal'
 import { Field, inputCls, ModalShell } from '../../components/ui/Modal'
 import { useAdminAuth } from '../../contexts/AdminAuthContext'
 import { inActiveBranch, useBranch } from '../../contexts/BranchContext'
-import { FREQUENCY_PRESETS, canManageAreas, canManageCategories, categorySlugLabel, formatClock, formatDuration, formatFrequency, frequencyCountdown } from '../../lib/domain'
+import { FREQUENCY_PRESETS, canManageAreas, canManageBenchmarks, canManageCategories, categorySlugLabel, formatClock, formatDuration, formatFrequency, frequencyCountdown } from '../../lib/domain'
 import {
   AREA_EXPORT_FIELDS,
   buildAreaExportRows,
@@ -17,17 +17,20 @@ import { exportRowsToCsv, exportRowsToXlsx } from '../../lib/reportExport'
 import { toLocalDateStamp } from '../../lib/reports'
 import { repo } from '../../lib/repo'
 import type { CreateAreaInput, ImportAreaRow, UpdateAreaInput } from '../../lib/repo/types'
-import type { Area, Branch, ImportBatch, LocationCategory } from '../../lib/types'
+import type { Area, Benchmark, Branch, ImportBatch, LocationCategory } from '../../lib/types'
 import { AdminLayout } from '../AdminLayout'
 import { ManageCategoriesModal } from './ManageCategories'
+import { ManageBenchmarksModal } from './ManageBenchmarks'
 
 export function Locations() {
   const { admin } = useAdminAuth()
   const { activeBranchId, activeBranch, branches } = useBranch()
   const [areas, setAreas] = useState<Area[]>([])
   const [categories, setCategories] = useState<LocationCategory[]>([])
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<string>('all')
+  const [manageBenchmarksOpen, setManageBenchmarksOpen] = useState(false)
   const [qrArea, setQrArea] = useState<Area | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [editArea, setEditArea] = useState<Area | null>(null)
@@ -43,9 +46,10 @@ export function Locations() {
   useEffect(() => {
     if (!admin) return
     function load() {
-      Promise.all([repo.listAreasForSite(admin!.siteId), repo.listCategories(admin!.siteId)]).then(([a, c]) => {
+      Promise.all([repo.listAreasForSite(admin!.siteId), repo.listCategories(admin!.siteId), repo.listBenchmarks(admin!.siteId)]).then(([a, c, bm]) => {
         setAreas(a)
         setCategories(c)
+        setBenchmarks(bm)
         setLoading(false)
       })
     }
@@ -127,6 +131,7 @@ export function Locations() {
 
   const canEdit = canManageAreas(admin.role)
   const canManageCats = canManageCategories(admin)
+  const canManageBench = canManageBenchmarks(admin)
 
   return (
     <AdminLayout>
@@ -161,6 +166,14 @@ export function Locations() {
               className="flex h-9.5 items-center gap-1.5 rounded-[11px] border border-line bg-white px-3.5 text-sm font-bold text-ink-soft"
             >
               Manage categories
+            </button>
+          )}
+          {canManageBench && (
+            <button
+              onClick={() => setManageBenchmarksOpen(true)}
+              className="flex h-9.5 items-center gap-1.5 rounded-[11px] border border-line bg-white px-3.5 text-sm font-bold text-ink-soft"
+            >
+              Benchmarks
             </button>
           )}
           {canEdit && (
@@ -348,6 +361,17 @@ export function Locations() {
           onClose={() => setManageCatsOpen(false)}
           onChanged={(cats) => setCategories(cats)}
           onAreasChanged={() => repo.listAreasForSite(admin.siteId).then(setAreas)}
+        />
+      )}
+
+      {manageBenchmarksOpen && admin && (
+        <ManageBenchmarksModal
+          siteId={admin.siteId}
+          branches={branches}
+          categories={categories}
+          benchmarks={benchmarks}
+          onClose={() => setManageBenchmarksOpen(false)}
+          onChanged={(bm) => setBenchmarks(bm)}
         />
       )}
 

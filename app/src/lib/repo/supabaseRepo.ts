@@ -1,6 +1,6 @@
 import { colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
 import { supabase } from '../supabaseClient'
-import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Branch, BranchStatus, ChecklistTask, ImportBatch, Issue, LocationCategory, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
+import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Benchmark, Branch, BranchStatus, ChecklistTask, ImportBatch, Issue, LocationCategory, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
 import type { CreateAdminInput, CreateBranchInput, CreateScheduleInput, CreateStaffInput, CreateTaskInput, DataRepo, ImportAreaRow, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput, UpdateTaskInput } from './types'
 
 /** Turn a raw Postgres/RPC error into the friendly duplicate messages the UI expects. */
@@ -187,6 +187,24 @@ function mapCategory(row: Record<string, unknown>): LocationCategory {
     isGlobal: (row.is_global as boolean) ?? true,
     isActive: (row.is_active as boolean) ?? true,
     sortOrder: (row.sort_order as number) ?? 0,
+    createdAt: (row.created_at as string) ?? new Date().toISOString(),
+    archivedAt: (row.archived_at as string) ?? null,
+  }
+}
+
+function mapBenchmark(row: Record<string, unknown>): Benchmark {
+  return {
+    id: row.id as string,
+    siteId: row.site_id as string,
+    name: row.name as string,
+    branchId: (row.branch_id as string) ?? null,
+    categoryId: (row.category_id as string) ?? null,
+    areaId: (row.area_id as string) ?? null,
+    requiredCleansPerDay: (row.required_cleans_per_day as number) ?? 1,
+    intervalMinutes: (row.interval_minutes as number) ?? null,
+    photoRequired: (row.photo_required as boolean) ?? false,
+    isGlobal: (row.is_global as boolean) ?? true,
+    isActive: (row.is_active as boolean) ?? true,
     createdAt: (row.created_at as string) ?? new Date().toISOString(),
     archivedAt: (row.archived_at as string) ?? null,
   }
@@ -882,6 +900,70 @@ export const supabaseRepo: DataRepo = {
     const to = (cats ?? []).find((c) => c.id === toCategoryId)
     if (from) await logAudit(from.site_id as string, 'category_reassigned', `${from.name} → ${to?.name ?? '—'}`, `${data ?? 0} location(s)`)
     return (data as number) ?? 0
+  },
+
+  // ————— Cleaning benchmarks —————
+
+  async listBenchmarks(siteId) {
+    const { data, error } = await client().from('cleaning_benchmarks').select('*').eq('site_id', siteId).order('created_at', { ascending: true })
+    if (error) throw error
+    return (data ?? []).map(mapBenchmark)
+  },
+
+  async createBenchmark(siteId, input) {
+    const { data, error } = await client().rpc('create_benchmark', {
+      p_site_id: siteId,
+      p_name: input.name.trim(),
+      p_category_id: input.categoryId,
+      p_branch_id: input.isGlobal ? null : input.branchId ?? null,
+      p_area_id: input.areaId ?? null,
+      p_required_cleans: input.requiredCleansPerDay,
+      p_interval_minutes: input.intervalMinutes ?? null,
+      p_checklist_template_id: null,
+      p_photo_required: input.photoRequired,
+      p_is_global: input.isGlobal,
+    })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const benchmark = mapBenchmark(row)
+    await logAudit(siteId, 'benchmark_created', benchmark.name, `${benchmark.requiredCleansPerDay}×/day`)
+    return benchmark
+  },
+
+  async updateBenchmark(benchmarkId, patch) {
+    const { data, error } = await client().rpc('update_benchmark', {
+      p_id: benchmarkId,
+      p_name: patch.name ?? null,
+      p_required_cleans: patch.requiredCleansPerDay ?? null,
+      p_interval_minutes: patch.intervalMinutes ?? null,
+      p_photo_required: patch.photoRequired ?? null,
+      p_category_id: patch.categoryId ?? null,
+    })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const benchmark = mapBenchmark(row)
+    await logAudit(benchmark.siteId, 'benchmark_updated', benchmark.name)
+    return benchmark
+  },
+
+  async setBenchmarkActive(benchmarkId, active) {
+    const { data, error } = await client().rpc('set_benchmark_active', { p_id: benchmarkId, p_active: active })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const benchmark = mapBenchmark(row)
+    await logAudit(benchmark.siteId, active ? 'benchmark_restored' : 'benchmark_archived', benchmark.name)
+    return benchmark
+  },
+
+  async deleteBenchmark(benchmarkId) {
+    const { data: b } = await client().from('cleaning_benchmarks').select('site_id, name').eq('id', benchmarkId).maybeSingle()
+    const { error } = await client().rpc('delete_benchmark', { p_id: benchmarkId })
+    if (error) throw new Error(error.message)
+    if (b) await logAudit(b.site_id as string, 'benchmark_deleted', b.name as string)
+  },
+
+  async logBenchmarkOverride(siteId, detail) {
+    await logAudit(siteId, 'benchmark_overridden', detail)
   },
 
   async listImportBatches(siteId) {

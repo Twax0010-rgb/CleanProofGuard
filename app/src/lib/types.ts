@@ -72,6 +72,7 @@ export type AdminFeature =
   | 'liveMap'
   | 'users'
   | 'categories'
+  | 'benchmarks'
   | 'settings'
 
 export type PermissionAction = 'view' | 'manage' | 'export'
@@ -206,6 +207,23 @@ export interface Assignment {
   occurrenceTotal: number | null
 }
 
+/** An editable cleaning-frequency benchmark for a category (optionally branch/area scoped). */
+export interface Benchmark {
+  id: string
+  siteId: string
+  name: string
+  branchId: string | null
+  categoryId: string | null
+  areaId: string | null
+  requiredCleansPerDay: number
+  intervalMinutes: number | null
+  photoRequired: boolean
+  isGlobal: boolean
+  isActive: boolean
+  createdAt: string
+  archivedAt: string | null
+}
+
 /** A recurring cleaning schedule definition (occurrences are generated as Assignment rows). */
 export interface CleaningSchedule {
   id: string
@@ -323,6 +341,12 @@ export type AuditAction =
   | 'schedule_paused'
   | 'schedule_archived'
   | 'schedule_restored'
+  | 'benchmark_created'
+  | 'benchmark_updated'
+  | 'benchmark_archived'
+  | 'benchmark_restored'
+  | 'benchmark_deleted'
+  | 'benchmark_overridden'
 
 /** A record of a privileged admin action, for accountability — who did what and when. */
 export interface AuditLogEntry {

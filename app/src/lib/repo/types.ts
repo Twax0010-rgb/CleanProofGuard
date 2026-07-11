@@ -6,6 +6,7 @@ import type {
   AuditLogEntry,
   Branch,
   BranchStatus,
+  Benchmark,
   CleaningSchedule,
   ImportBatch,
   Issue,
@@ -123,6 +124,25 @@ export interface CreateScheduleInput {
   isActive: boolean
   /** Generate today's occurrences now (false = save the definition only, e.g. draft). */
   generateToday: boolean
+}
+
+export interface CreateBenchmarkInput {
+  name: string
+  categoryId: string | null
+  branchId?: string | null
+  areaId?: string | null
+  requiredCleansPerDay: number
+  intervalMinutes?: number | null
+  photoRequired: boolean
+  isGlobal: boolean
+}
+
+export interface UpdateBenchmarkInput {
+  name?: string
+  requiredCleansPerDay?: number
+  intervalMinutes?: number | null
+  photoRequired?: boolean
+  categoryId?: string | null
 }
 
 export interface CreateTaskInput {
@@ -344,6 +364,16 @@ export interface DataRepo {
   deleteCategory(categoryId: string): Promise<void>
   /** Bulk-move every area from one category to another; returns how many moved. */
   reassignCategory(fromCategoryId: string, toCategoryId: string): Promise<number>
+
+  // ————— Cleaning benchmarks —————
+  listBenchmarks(siteId: string): Promise<Benchmark[]>
+  /** Manage-benchmarks permission required (superuser by default). */
+  createBenchmark(siteId: string, input: CreateBenchmarkInput): Promise<Benchmark>
+  updateBenchmark(benchmarkId: string, patch: UpdateBenchmarkInput): Promise<Benchmark>
+  setBenchmarkActive(benchmarkId: string, active: boolean): Promise<Benchmark>
+  deleteBenchmark(benchmarkId: string): Promise<void>
+  /** Records that a schedule was created with a frequency different from the category's benchmark. */
+  logBenchmarkOverride(siteId: string, detail: string): Promise<void>
 
   /** Staff flags a problem — an alternative (or addition) to marking an area clean. */
   reportIssue(

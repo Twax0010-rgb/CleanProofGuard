@@ -9,7 +9,7 @@ import { canManageTemplates, activeStaff, canManageRoutes, effectiveStatus, form
 import { repo } from '../../lib/repo'
 import { filterAssignmentsInRange, formatDateRangeLabel, resolveDateRange } from '../../lib/reports'
 import type { DateRange } from '../../lib/reports'
-import type { Area, Assignment, LocationCategory, Staff, TaskPriority, TaskTemplate, TaskType } from '../../lib/types'
+import type { Area, Assignment, Benchmark, LocationCategory, Staff, TaskPriority, TaskTemplate, TaskType } from '../../lib/types'
 import { Field, inputCls } from '../../components/ui/Modal'
 import { AdminLayout } from '../AdminLayout'
 import { CreateTaskModal } from '../CreateTaskModal'
@@ -42,6 +42,7 @@ export function Assignments() {
   const [staff, setStaff] = useState<Staff[]>([])
   const [areas, setAreas] = useState<Area[]>([])
   const [categories, setCategories] = useState<LocationCategory[]>([])
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -68,12 +69,14 @@ export function Assignments() {
         repo.listAreasForSite(admin!.siteId),
         repo.listTaskTemplates(admin!.siteId),
         repo.listCategories(admin!.siteId),
-      ]).then(([a, s, ar, t, c]) => {
+        repo.listBenchmarks(admin!.siteId),
+      ]).then(([a, s, ar, t, c, bm]) => {
         setAssignments(a)
         setStaff(s)
         setAreas(ar)
         setTemplates(t)
         setCategories(c)
+        setBenchmarks(bm)
         setLoading(false)
       })
     }
@@ -464,6 +467,7 @@ export function Assignments() {
           defaultBranchId={activeBranchId ?? branches[0]?.id ?? ''}
           areas={areas}
           categories={categories}
+          benchmarks={benchmarks}
           staff={staff}
           templates={templates}
           onClose={() => setScheduleTaskOpen(false)}
