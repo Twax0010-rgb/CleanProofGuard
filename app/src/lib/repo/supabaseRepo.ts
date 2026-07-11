@@ -1,7 +1,18 @@
 import { colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
 import { supabase } from '../supabaseClient'
 import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Branch, BranchStatus, ChecklistTask, ImportBatch, Issue, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
-import type { CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ImportAreaRow, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateBranchInput, UpdateStaffInput, UpdateTaskInput } from './types'
+import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ImportAreaRow, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput, UpdateTaskInput } from './types'
+
+/** Turn a raw Postgres/RPC error into the friendly duplicate messages the UI expects. */
+function friendlyAdminError(message: string, email: string, staffCode: string): string {
+  if (message.includes('already exists') || message.includes('admin_profiles_email_key')) {
+    return `An account with "${email.trim().toLowerCase()}" already exists.`
+  }
+  if (message.includes('already in use') || message.includes('admin_profiles_staff_id_key')) {
+    return `Staff ID "${staffCode}" is already in use.`
+  }
+  return message
+}
 
 function client() {
   if (!supabase) throw new Error('Supabase is not configured — check your .env')
@@ -136,7 +147,10 @@ function mapAdmin(row: Record<string, unknown>, email: string): AdminUser {
     colorHex: row.color_hex as string,
     title: row.title as string,
     role: (row.role as AdminUser['role']) ?? 'read_only',
-    email,
+    email: (row.email as string) || email,
+    phone: (row.phone as string) ?? null,
+    staffCode: (row.staff_id as string) ?? null,
+    accountStatus: (row.account_status as AdminUser['accountStatus']) ?? 'active',
     branchAll: (row.branch_all as boolean) ?? false,
     branchIds: (row.branch_ids as string[]) ?? [],
     defaultBranchId: (row.default_branch_id as string) ?? null,
@@ -310,6 +324,11 @@ export const supabaseRepo: DataRepo = {
       .eq('id', data.user.id)
       .maybeSingle()
     if (profileError || !profile) return null
+    // Disabled/archived admins keep their history but can't sign in — drop the session.
+    if ((profile.account_status as string) !== 'active') {
+      await client().auth.signOut()
+      return null
+    }
     return mapAdmin(profile, email)
   },
 
@@ -1054,14 +1073,60 @@ export const supabaseRepo: DataRepo = {
     return (data ?? []).map((row) => mapAdmin(row, (row.email as string) ?? ''))
   },
 
-  async createAdmin() {
-    // Admin accounts are backed by Supabase Auth users, which can't be created from the
-    // browser with the anon key. Create the auth user first (dashboard or
-    // supabase.auth.admin.createUser from a trusted server), then add their
-    // admin_profiles row — Users & Access can manage their branch access from there.
-    throw new Error(
-      'In Supabase mode, create the login in the Supabase dashboard first (Auth → Users), then add their admin_profiles row.',
-    )
+  async createAdmin(siteId, input: CreateAdminInput) {
+    // The anon key can't create auth users directly, so this goes through the
+    // superuser-gated create_admin_account RPC (SECURITY DEFINER) which makes the
+    // auth.users + identity + admin_profiles rows in one shot.
+    const staffCode = input.staffCode?.trim() || generateStaffCode(input.name)
+    const { data, error } = await client().rpc('create_admin_account', {
+      p_site_id: siteId,
+      p_name: input.name.trim(),
+      p_email: input.email.trim(),
+      p_password: input.password,
+      p_phone: input.phone ?? null,
+      p_title: input.title.trim(),
+      p_role: input.role,
+      p_staff_id: staffCode,
+      p_initials: initialsFrom(input.name),
+      p_color_hex: colorForName(input.name),
+      p_branch_all: input.branchAll,
+      p_branch_ids: input.branchAll ? [] : input.branchIds,
+      p_default_branch_id: input.branchAll ? null : input.defaultBranchId ?? input.branchIds[0] ?? null,
+      p_account_status: input.accountStatus ?? 'active',
+    })
+    if (error) throw new Error(friendlyAdminError(error.message, input.email, staffCode))
+    const row = Array.isArray(data) ? data[0] : data
+    const admin = mapAdmin(row, input.email.trim().toLowerCase())
+    await logAudit(siteId, 'user_added', admin.name, `Dashboard account · ${admin.email}`)
+    return admin
+  },
+
+  async updateAdmin(adminId, patch: UpdateAdminInput) {
+    const payload: Record<string, unknown> = {}
+    if (patch.name !== undefined) {
+      payload.name = patch.name.trim()
+      payload.initials = initialsFrom(patch.name)
+    }
+    if (patch.title !== undefined) payload.title = patch.title.trim() || 'Dashboard user'
+    if (patch.email !== undefined) payload.email = patch.email.trim().toLowerCase()
+    if (patch.phone !== undefined) payload.phone = patch.phone?.trim() || null
+    if (patch.staffCode !== undefined) payload.staff_id = patch.staffCode.trim()
+    if (patch.role !== undefined) payload.role = patch.role
+    const { data, error } = await client().from('admin_profiles').update(payload).eq('id', adminId).select('*').single()
+    if (error) throw new Error(friendlyAdminError(error.message, patch.email ?? '', patch.staffCode ?? ''))
+    const admin = mapAdmin(data, (data.email as string) ?? '')
+    await logAudit(admin.siteId, patch.role ? 'permissions_updated' : 'user_updated', admin.name)
+    return admin
+  },
+
+  async setAdminStatus(adminId, status) {
+    const { data, error } = await client().rpc('set_admin_status', { p_admin_id: adminId, p_status: status })
+    if (error) throw error
+    const row = Array.isArray(data) ? data[0] : data
+    const admin = mapAdmin(row, (row.email as string) ?? '')
+    const action = status === 'archived' ? 'user_archived' : status === 'active' ? 'user_restored' : 'user_updated'
+    await logAudit(admin.siteId, action, admin.name, status === 'disabled' ? 'Disabled' : null)
+    return admin
   },
 
   async updateAdminAccess(adminId, patch: UpdateAdminAccessInput) {

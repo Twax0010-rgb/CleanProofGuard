@@ -1,7 +1,40 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-11 fourth session, for the next session)
-**No task in progress.** Newest work — Staff page management upgrades, all verified in the browser
+## ⏸ Where we left off (2026-07-11 fifth session, for the next session)
+**No task in progress.** Newest work — the **Users & Access page was rebuilt to match the Staff
+page** (admin/dashboard accounts only; staff stay on the Staff page). All verified in the browser
+against Supabase as thando@ (superuser):
+- **Staff-style layout**: page header with count + branch scope, filter pills (All / Active /
+  Disabled / Archived), search over name/ID/email/role/branch, card rows with avatar, name,
+  **admin ID code** (e.g. AD-style, shown + editable), status badge, role badge, email/phone,
+  branch-access summary + default branch, an Active/Disabled status dropdown, and Edit /
+  Manage access / Archive buttons (Restore on archived rows).
+- **Admins now have real lifecycle fields.** Migration `admin_lifecycle_columns` added
+  `staff_id, email, phone, account_status, created_at, updated_at, archived_at/by, restored_at/by`
+  to `admin_profiles` (email was previously only in auth.users, so rows showed blank emails — now
+  fixed + backfilled; staff_id backfilled as INITIALS-#### for the 7 existing admins).
+- **Backend enforcement** (migration `admin_status_enforcement`): `current_admin_role()` now only
+  returns a role for `account_status='active'`, so disabled/archived admins fail every RLS
+  policy + RPC across the app (can't log in or see any data). A guard trigger blocks self-role-
+  escalation to superuser and prevents demoting/disabling/archiving the **last active superuser**.
+  `set_admin_status` RPC (superuser-only) handles archive/disable/restore with audit stamps.
+- **Add user now actually works in Supabase mode** via `create_admin_account` RPC (migration
+  `create_admin_account_rpc`) — a SECURITY DEFINER function that makes the auth.users + identity +
+  admin_profiles rows in one shot (the anon key can't create auth users directly). Superuser-gated.
+  The Add modal collects name, Staff ID (+ Generate ID), email, phone, role, branch access (+ All),
+  default branch, a **starting password** (admins log in by email+password, not PIN), and status.
+- **Auth gates**: both repos' `authenticateAdmin` reject non-active admins; `AdminAuthContext`
+  drops a stored session if the admin was since disabled/archived.
+- All admin mutations (add/edit/archive/manage-access) are superuser-only in the UI **and** on the
+  backend. Verified: create (real auth user made), duplicate Staff ID rejected, archive→Archived
+  tab + audit stamps, restore, last-superuser guard fires (tested via rolled-back SQL). Test admin
+  removed from the live DB afterward. Build + lint clean. Mock seed bumped to `cpg_mock_state_v15`.
+- NOTE: admins log in by **email + password**, not Staff ID; the admin Staff ID is a display code.
+  In mock/demo mode new admins still use the shared `demo1234` password (mock auth ignores the
+  per-user password); in Supabase mode the starting password set in the modal is real.
+
+## Previous session (2026-07-11, fourth session)
+**No task in progress.** Staff page management upgrades, all verified in the browser
 against Supabase:
 - **Editable Staff ID**: optional Staff ID field on Add user (auto-generates when blank) and an
   editable Staff ID field on Edit user. Unique-code clashes surface friendly errors in both repos

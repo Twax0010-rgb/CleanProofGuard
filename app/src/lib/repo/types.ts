@@ -126,6 +126,23 @@ export interface CreateAdminInput {
   branchAll: boolean
   branchIds: string[]
   defaultBranchId: string | null
+  phone?: string | null
+  /** Display id (e.g. AD-1042). Auto-generated from the name if omitted. */
+  staffCode?: string
+  /** Starting password for the new dashboard login. */
+  password: string
+  /** Initial lifecycle state. Defaults to 'active'. */
+  accountStatus?: 'active' | 'disabled'
+}
+
+/** Basic-field edits from the Users & Access "Edit" modal (not branch/permission access). */
+export interface UpdateAdminInput {
+  name?: string
+  title?: string
+  email?: string
+  phone?: string | null
+  staffCode?: string
+  role?: AdminUser['role']
 }
 
 /** Filters for the Photo Proof gallery. All optional; branchId narrows within the caller's allowed set. */
@@ -206,6 +223,10 @@ export interface DataRepo {
   createAdmin(siteId: string, input: CreateAdminInput): Promise<AdminUser>
   /** Superuser-only: change a user's branch access, default branch, permission overrides, or role. */
   updateAdminAccess(adminId: string, patch: UpdateAdminAccessInput): Promise<AdminUser>
+  /** Superuser-only: edit an admin's basic fields (name/title/email/phone/staff id/role). */
+  updateAdmin(adminId: string, patch: UpdateAdminInput): Promise<AdminUser>
+  /** Superuser-only: archive/disable/restore an admin. Backend blocks removing the last active superuser. */
+  setAdminStatus(adminId: string, status: 'active' | 'disabled' | 'archived'): Promise<AdminUser>
 
   // ————— Staff photo proof —————
   /** Flattened proof photos the acting admin may view, filtered. Enforces branch access on the backend. */

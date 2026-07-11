@@ -26,8 +26,11 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     repo
       .getAdmin(id)
       .then((a) => {
-        setAdmin(a)
-        repo.setActingAdmin(a?.id ?? null)
+        // A session for an admin who was since disabled/archived is no longer valid.
+        const valid = a && a.accountStatus === 'active' ? a : null
+        if (a && !valid) localStorage.removeItem(STORAGE_KEY)
+        setAdmin(valid)
+        repo.setActingAdmin(valid?.id ?? null)
       })
       .finally(() => setLoading(false))
   }, [])

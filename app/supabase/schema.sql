@@ -84,8 +84,25 @@ create table if not exists admin_profiles (
   branch_ids uuid[] not null default '{}',
   default_branch_id uuid references branches(id) on delete set null,
   -- Per-feature permission overrides layered on the role defaults, e.g. {"branches":{"manage":true}}.
-  permissions jsonb not null default '{}'
+  permissions jsonb not null default '{}',
+  -- Users & Access lifecycle (mirrors staff). Admins log in by email+password;
+  -- staff_id is a display identifier shown on their row, not a login credential.
+  -- email is denormalized from auth.users so the dashboard can list it without
+  -- an auth-schema join. account_status gates access: current_admin_role()
+  -- returns a role only for 'active' admins, so disabled/archived lose all access.
+  staff_id text,
+  email text,
+  phone text,
+  account_status text not null default 'active' check (account_status in ('active', 'disabled', 'archived')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz,
+  archived_at timestamptz,
+  archived_by uuid,
+  restored_at timestamptz,
+  restored_by uuid
 );
+create unique index if not exists admin_profiles_staff_id_key on admin_profiles (lower(staff_id)) where staff_id is not null;
+create unique index if not exists admin_profiles_email_key on admin_profiles (lower(email)) where email is not null;
 
 -- A physical space that gets cleaned. Areas are persistent config; assignments
 -- (below) are individual cleaning-cycle instances against an area.
@@ -320,6 +337,9 @@ set search_path = public
 as $$
   select role from admin_profiles
   where id = auth.uid()
+    -- Only active admins have an effective role: disabled/archived admins fail
+    -- every role-gated policy and RPC, so they can't read or change anything.
+    and account_status = 'active'
     and (p_site_id is null or site_id = p_site_id)
   limit 1
 $$;
@@ -964,6 +984,129 @@ create policy "superusers can read all admin profiles" on admin_profiles for sel
 create policy "superusers can update admin profiles" on admin_profiles for update
   using (current_admin_role(site_id) = 'superuser')
   with check (current_admin_role(site_id) = 'superuser');
+
+-- Invariant guard on admin_profiles: a user can't lift their own role to superuser,
+-- and the last active superuser at a site can't be demoted, disabled, or archived.
+create or replace function guard_admin_profiles()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_active_superusers int;
+begin
+  if tg_op = 'UPDATE' and new.id = auth.uid()
+     and new.role = 'superuser' and old.role is distinct from 'superuser' then
+    raise exception 'You cannot change your own role to superuser.';
+  end if;
+  if tg_op = 'UPDATE'
+     and old.role = 'superuser' and old.account_status = 'active'
+     and (new.role is distinct from 'superuser' or new.account_status <> 'active') then
+    select count(*) into v_active_superusers
+    from admin_profiles
+    where site_id = old.site_id and role = 'superuser'
+      and account_status = 'active' and id <> old.id;
+    if v_active_superusers = 0 then
+      raise exception 'This is the last active superuser — assign another before changing this one.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_guard_admin_profiles on admin_profiles;
+create trigger trg_guard_admin_profiles before update on admin_profiles
+  for each row execute function guard_admin_profiles();
+
+create or replace function touch_admin_profiles_updated_at()
+returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end;
+$$;
+drop trigger if exists trg_touch_admin_profiles on admin_profiles;
+create trigger trg_touch_admin_profiles before update on admin_profiles
+  for each row execute function touch_admin_profiles_updated_at();
+
+-- Superuser-only lifecycle change (archive / disable / restore) with audit stamps.
+create or replace function set_admin_status(p_admin_id uuid, p_status text)
+returns setof admin_profiles
+language plpgsql security definer set search_path = public as $$
+declare
+  v_site_id uuid;
+begin
+  if p_status not in ('active', 'disabled', 'archived') then
+    raise exception 'Invalid status %', p_status;
+  end if;
+  select site_id into v_site_id from admin_profiles where id = p_admin_id;
+  if v_site_id is null or coalesce(current_admin_role(v_site_id), '') <> 'superuser' then
+    raise exception 'Not authorized to change a user''s status';
+  end if;
+  return query
+  update admin_profiles set
+    account_status = p_status,
+    archived_at = case when p_status = 'archived' then now() else archived_at end,
+    archived_by = case when p_status = 'archived' then auth.uid() else archived_by end,
+    restored_at = case when p_status = 'active' then now() else restored_at end,
+    restored_by = case when p_status = 'active' then auth.uid() else restored_by end
+  where id = p_admin_id
+  returning *;
+end;
+$$;
+
+-- Superuser-only: create a dashboard admin from the browser (anon key can't make
+-- auth users directly, so this definer function does auth.users + identities +
+-- admin_profiles in one shot). staff_id/email uniqueness enforced here.
+create or replace function create_admin_account(
+  p_site_id uuid, p_name text, p_email text, p_password text, p_phone text,
+  p_title text, p_role text, p_staff_id text, p_initials text, p_color_hex text,
+  p_branch_all boolean, p_branch_ids uuid[], p_default_branch_id uuid, p_account_status text
+)
+returns setof admin_profiles
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  v_email text := lower(trim(p_email));
+  v_new_id uuid := gen_random_uuid();
+begin
+  if coalesce(current_admin_role(p_site_id), '') <> 'superuser' then
+    raise exception 'Not authorized to add a dashboard user';
+  end if;
+  if v_email is null or v_email = '' then
+    raise exception 'An email address is required.';
+  end if;
+  if exists (select 1 from auth.users where lower(email) = v_email)
+     or exists (select 1 from admin_profiles where lower(email) = v_email) then
+    raise exception 'An account with "%" already exists.', v_email;
+  end if;
+  if p_staff_id is not null and exists (select 1 from admin_profiles where lower(staff_id) = lower(p_staff_id)) then
+    raise exception 'Staff ID "%" is already in use.', p_staff_id;
+  end if;
+
+  insert into auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+    confirmation_token, recovery_token, email_change_token_new, email_change,
+    email_change_token_current, phone_change, phone_change_token, reauthentication_token
+  ) values (
+    '00000000-0000-0000-0000-000000000000', v_new_id, 'authenticated', 'authenticated',
+    v_email, crypt(p_password, gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now(),
+    '', '', '', '', '', '', '', ''
+  );
+  insert into auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
+  values (gen_random_uuid(), v_new_id,
+    jsonb_build_object('sub', v_new_id::text, 'email', v_email, 'email_verified', true, 'phone_verified', false),
+    'email', v_new_id::text, now(), now(), now());
+
+  return query
+  insert into admin_profiles (
+    id, site_id, name, initials, color_hex, title, role, email, phone, staff_id,
+    branch_all, branch_ids, default_branch_id, permissions, account_status
+  ) values (
+    v_new_id, p_site_id, p_name, p_initials, p_color_hex, coalesce(nullif(p_title, ''), 'Dashboard user'),
+    p_role, v_email, nullif(trim(p_phone), ''), p_staff_id,
+    p_branch_all, coalesce(p_branch_ids, '{}'), p_default_branch_id, '{}'::jsonb,
+    coalesce(nullif(p_account_status, ''), 'active')
+  )
+  returning *;
+end;
+$$;
+grant execute on function set_admin_status(uuid, text) to authenticated;
+grant execute on function create_admin_account(uuid, text, text, text, text, text, text, text, text, text, boolean, uuid[], uuid, text) to authenticated;
 
 -- Direct staff-table edits (name/contact/role/account status) require Manager+;
 -- shift-status changes go through set_staff_status() above instead, since that

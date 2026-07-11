@@ -89,6 +89,14 @@ export interface AdminUser {
   title: string
   role: AdminRole
   email: string
+  /** Phone number, optional. */
+  phone: string | null
+  /** Display identifier shown on the Users & Access row (e.g. AD-1042). Admins still
+   * log in by email+password — this is not a login credential, unlike a staff code. */
+  staffCode: string | null
+  /** Account lifecycle. Only 'active' admins can sign in or reach any data;
+   * 'archived'/'disabled' keep their history but lose access. ('deleted' unused for admins.) */
+  accountStatus: AccountStatus
   /** True = access to every branch at the site (superusers, regional owners). */
   branchAll: boolean
   /** Specific branch ids this admin may access (ignored when branchAll is true). */

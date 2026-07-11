@@ -20,9 +20,9 @@ import type {
   TaskTemplate,
 } from '../types'
 import { DEMO_ADMIN_PASSWORD, SITE_ID, buildSeed } from './seed'
-import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateBranchInput, UpdateStaffInput } from './types'
+import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput } from './types'
 
-const STORAGE_KEY = 'cpg_mock_state_v14'
+const STORAGE_KEY = 'cpg_mock_state_v15'
 const MAX_STATE_AGE_MS = 12 * 60 * 60 * 1000 // reseed if the demo has gone stale (e.g. next day)
 
 interface PersistedState {
@@ -346,6 +346,8 @@ export const mockRepo: DataRepo = {
   async authenticateAdmin(email, password) {
     const admin = state.admins.find((a) => a.email.toLowerCase() === email.trim().toLowerCase())
     if (!admin || password !== DEMO_ADMIN_PASSWORD) return delay(null)
+    // Disabled/archived admins keep their history but can't sign in.
+    if (admin.accountStatus !== 'active') return delay(null)
     return delay(admin)
   },
 
@@ -1009,6 +1011,10 @@ export const mockRepo: DataRepo = {
     if (state.admins.some((a) => a.email.toLowerCase() === email)) {
       throw new Error(`An account with "${email}" already exists.`)
     }
+    const staffCode = input.staffCode?.trim() || generateStaffCode(input.name)
+    if (state.admins.some((a) => a.staffCode?.toLowerCase() === staffCode.toLowerCase())) {
+      throw new Error(`Staff ID "${staffCode}" is already in use.`)
+    }
     const admin: AdminUser = {
       id: uid('admin-new'),
       siteId,
@@ -1018,6 +1024,9 @@ export const mockRepo: DataRepo = {
       title: input.title.trim() || 'Dashboard user',
       role: input.role,
       email,
+      phone: input.phone?.trim() || null,
+      staffCode,
+      accountStatus: input.accountStatus ?? 'active',
       branchAll: input.branchAll,
       branchIds: input.branchIds,
       defaultBranchId:
@@ -1032,10 +1041,83 @@ export const mockRepo: DataRepo = {
     return delay(admin)
   },
 
-  async updateAdminAccess(adminId, patch: UpdateAdminAccessInput) {
-    requireAdmin((a) => a.role === 'superuser', 'change branch access or permissions')
+  async updateAdmin(adminId, patch: UpdateAdminInput) {
+    const actor = requireAdmin((a) => a.role === 'superuser', 'edit a user')
     const before = state.admins.find((a) => a.id === adminId)
     if (!before) throw new Error('User not found')
+    // A user can't lift their own role to superuser.
+    if (patch.role === 'superuser' && before.role !== 'superuser' && adminId === actor.id) {
+      throw new Error('You cannot change your own role to superuser.')
+    }
+    // Never demote the last active superuser.
+    if (before.role === 'superuser' && before.accountStatus === 'active' && patch.role && patch.role !== 'superuser') {
+      const others = state.admins.filter(
+        (a) => a.id !== adminId && a.siteId === before.siteId && a.role === 'superuser' && a.accountStatus === 'active',
+      )
+      if (others.length === 0) throw new Error('This is the last active superuser — assign another before changing this one.')
+    }
+    if (patch.email) {
+      const email = patch.email.trim().toLowerCase()
+      if (state.admins.some((a) => a.id !== adminId && a.email.toLowerCase() === email)) {
+        throw new Error(`An account with "${email}" already exists.`)
+      }
+    }
+    if (patch.staffCode) {
+      const code = patch.staffCode.trim().toLowerCase()
+      if (state.admins.some((a) => a.id !== adminId && a.staffCode?.toLowerCase() === code)) {
+        throw new Error(`Staff ID "${patch.staffCode}" is already in use.`)
+      }
+    }
+    const updated: AdminUser = {
+      ...before,
+      name: patch.name?.trim() || before.name,
+      initials: patch.name ? initialsFrom(patch.name) : before.initials,
+      title: patch.title !== undefined ? patch.title.trim() || 'Dashboard user' : before.title,
+      email: patch.email !== undefined ? patch.email.trim().toLowerCase() : before.email,
+      phone: patch.phone !== undefined ? patch.phone?.trim() || null : before.phone,
+      staffCode: patch.staffCode !== undefined ? patch.staffCode.trim() : before.staffCode,
+      role: patch.role ?? before.role,
+    }
+    state.admins = state.admins.map((a) => (a.id === adminId ? updated : a))
+    logAction(before.siteId, patch.role && patch.role !== before.role ? 'permissions_updated' : 'user_updated', updated.name)
+    persist()
+    return delay(updated)
+  },
+
+  async setAdminStatus(adminId, status) {
+    requireAdmin((a) => a.role === 'superuser', "change a user's status")
+    const before = state.admins.find((a) => a.id === adminId)
+    if (!before) throw new Error('User not found')
+    // Never disable/archive the last active superuser.
+    if (before.role === 'superuser' && before.accountStatus === 'active' && status !== 'active') {
+      const others = state.admins.filter(
+        (a) => a.id !== adminId && a.siteId === before.siteId && a.role === 'superuser' && a.accountStatus === 'active',
+      )
+      if (others.length === 0) throw new Error('This is the last active superuser — assign another before archiving this one.')
+    }
+    const updated: AdminUser = { ...before, accountStatus: status }
+    state.admins = state.admins.map((a) => (a.id === adminId ? updated : a))
+    const action = status === 'archived' ? 'user_archived' : status === 'active' && before.accountStatus === 'archived' ? 'user_restored' : 'user_updated'
+    logAction(before.siteId, action, updated.name, status === 'disabled' ? 'Disabled' : status === 'active' ? 'Active' : null)
+    persist()
+    return delay(updated)
+  },
+
+  async updateAdminAccess(adminId, patch: UpdateAdminAccessInput) {
+    const actor = requireAdmin((a) => a.role === 'superuser', 'change branch access or permissions')
+    const before = state.admins.find((a) => a.id === adminId)
+    if (!before) throw new Error('User not found')
+    // A user can't lift their own role to superuser, or grant themselves more branches.
+    if (patch.role === 'superuser' && before.role !== 'superuser' && adminId === actor.id) {
+      throw new Error('You cannot change your own role to superuser.')
+    }
+    // Never demote the last active superuser.
+    if (before.role === 'superuser' && before.accountStatus === 'active' && patch.role && patch.role !== 'superuser') {
+      const others = state.admins.filter(
+        (a) => a.id !== adminId && a.siteId === before.siteId && a.role === 'superuser' && a.accountStatus === 'active',
+      )
+      if (others.length === 0) throw new Error('This is the last active superuser — assign another before changing this one.')
+    }
     const updated: AdminUser = {
       ...before,
       branchAll: patch.branchAll ?? before.branchAll,
