@@ -9,11 +9,12 @@ import { canManageTemplates, activeStaff, canManageRoutes, effectiveStatus, form
 import { repo } from '../../lib/repo'
 import { filterAssignmentsInRange, formatDateRangeLabel, resolveDateRange } from '../../lib/reports'
 import type { DateRange } from '../../lib/reports'
-import type { Area, Assignment, Staff, TaskPriority, TaskTemplate, TaskType } from '../../lib/types'
+import type { Area, Assignment, LocationCategory, Staff, TaskPriority, TaskTemplate, TaskType } from '../../lib/types'
 import { Field, inputCls } from '../../components/ui/Modal'
 import { AdminLayout } from '../AdminLayout'
 import { CreateTaskModal } from '../CreateTaskModal'
 import { ManageTaskTemplatesModal } from '../ManageTaskTemplatesModal'
+import { ScheduleTaskModal } from '../ScheduleTaskModal'
 
 const UNASSIGNED = '__unassigned__'
 
@@ -36,10 +37,11 @@ interface PendingReassign {
 
 export function Assignments() {
   const { admin } = useAdminAuth()
-  const { activeBranchId, activeBranch } = useBranch()
+  const { activeBranchId, activeBranch, branches } = useBranch()
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [areas, setAreas] = useState<Area[]>([])
+  const [categories, setCategories] = useState<LocationCategory[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -47,6 +49,7 @@ export function Assignments() {
   const [pendingReassign, setPendingReassign] = useState<PendingReassign | null>(null)
   const [range, setRange] = useState<DateRange>(() => resolveDateRange('today'))
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
+  const [scheduleTaskOpen, setScheduleTaskOpen] = useState(false)
   const [manageTemplatesOpen, setManageTemplatesOpen] = useState(false)
   const [reopenTarget, setReopenTarget] = useState<Assignment | null>(null)
   const [reopenReason, setReopenReason] = useState('')
@@ -64,11 +67,13 @@ export function Assignments() {
         repo.listStaffForSite(admin!.siteId),
         repo.listAreasForSite(admin!.siteId),
         repo.listTaskTemplates(admin!.siteId),
-      ]).then(([a, s, ar, t]) => {
+        repo.listCategories(admin!.siteId),
+      ]).then(([a, s, ar, t, c]) => {
         setAssignments(a)
         setStaff(s)
         setAreas(ar)
         setTemplates(t)
+        setCategories(c)
         setLoading(false)
       })
     }
@@ -182,15 +187,26 @@ export function Assignments() {
         {published && <span className="text-sm font-semibold text-verified-ink">Routes published ✓</span>}
         <DateRangePicker value={range} onChange={setRange} />
         {canManageRoutes(admin.role) && (
-          <button
-            onClick={() => setCreateTaskOpen(true)}
-            className="flex h-9.5 items-center gap-1.5 rounded-[11px] border border-line bg-white px-3.5 text-sm font-bold text-ink-soft"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Create task
-          </button>
+          <>
+            <button
+              onClick={() => setCreateTaskOpen(true)}
+              className="flex h-9.5 items-center gap-1.5 rounded-[11px] border border-line bg-white px-3.5 text-sm font-bold text-ink-soft"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Create task
+            </button>
+            <button
+              onClick={() => setScheduleTaskOpen(true)}
+              className="flex h-9.5 items-center gap-1.5 rounded-[11px] border border-line bg-white px-3.5 text-sm font-bold text-ink-soft"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18M8 15l2 2 4-4" />
+              </svg>
+              Schedule task
+            </button>
+          </>
         )}
         {!isToday ? (
           <span className="text-xs text-ink-soft">Read-only — switch to Today to reassign.</span>
@@ -440,6 +456,27 @@ export function Assignments() {
         />
       )}
 
+      {scheduleTaskOpen && admin && (
+        <ScheduleTaskModal
+          siteId={admin.siteId}
+          createdByName={admin.name}
+          branches={branches}
+          defaultBranchId={activeBranchId ?? branches[0]?.id ?? ''}
+          areas={areas}
+          categories={categories}
+          staff={staff}
+          templates={templates}
+          onClose={() => setScheduleTaskOpen(false)}
+          onCreated={(created) => {
+            setAssignments((prev) => {
+              const ids = new Set(prev.map((a) => a.id))
+              return [...prev, ...created.filter((a) => !ids.has(a.id))]
+            })
+            setScheduleTaskOpen(false)
+          }}
+        />
+      )}
+
       {manageTemplatesOpen && admin && (
         <ManageTaskTemplatesModal
           siteId={admin.siteId}
@@ -670,6 +707,11 @@ function Card({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 truncate text-[13px] font-bold">
           <span className="truncate">{assignment.areaName}</span>
+          {assignment.occurrenceNumber && assignment.occurrenceTotal && (
+            <span className="flex-shrink-0 rounded-full bg-info/10 px-1.5 py-0.25 text-[9px] font-bold text-info">
+              {assignment.occurrenceNumber}/{assignment.occurrenceTotal}
+            </span>
+          )}
           {(assignment.priority === 'high' || assignment.priority === 'urgent') && (
             <span
               className={`flex-shrink-0 rounded-full px-1.5 py-0.25 text-[9px] font-bold uppercase tracking-wide ${
@@ -680,12 +722,22 @@ function Card({
             </span>
           )}
         </div>
-        <div className="truncate font-mono text-[11px] text-muted">
-          {assignment.areaCode}
-          {status === 'overdue' && ' · overdue'}
-          {status === 'in_progress' && ' · active'}
-          {status === 'done' && assignment.submittedAt && ` · done ${formatClock(assignment.submittedAt)}`}
-          {assignment.templateName && ` · ${assignment.templateName}`}
+        <div className="flex items-center gap-1.5 truncate font-mono text-[11px] text-muted">
+          <span
+            className={`rounded px-1 py-0.25 text-[9px] font-bold uppercase tracking-wide ${
+              assignment.scheduleId ? 'bg-verified-tint text-verified-ink' : 'bg-line-soft text-ink-soft'
+            }`}
+          >
+            {assignment.scheduleId ? 'Scheduled' : 'One-off'}
+          </span>
+          <span className="truncate">
+            {assignment.scheduleId && assignment.occurrenceNumber && assignment.occurrenceTotal
+              ? `Clean ${assignment.occurrenceNumber} of ${assignment.occurrenceTotal}`
+              : assignment.areaCode}
+            {status === 'overdue' && ' · overdue'}
+            {status === 'in_progress' && ' · active'}
+            {status === 'done' && assignment.submittedAt && ` · done ${formatClock(assignment.submittedAt)}`}
+          </span>
         </div>
       </div>
       {onReopen && (

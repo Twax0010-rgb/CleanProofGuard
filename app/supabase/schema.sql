@@ -149,6 +149,51 @@ create table if not exists areas (
   active boolean not null default true
 );
 
+-- Recurring cleaning schedules. Occurrences are generated as `assignments` rows (below)
+-- so they flow through the existing board, staff app, proof, and reports.
+create table if not exists cleaning_schedules (
+  id uuid primary key default gen_random_uuid(),
+  site_id uuid not null references sites(id) on delete cascade,
+  name text not null,
+  branch_id uuid references branches(id) on delete set null,
+  category_id uuid references location_categories(id) on delete set null,
+  assigned_user_id uuid references staff(id) on delete set null,
+  recurrence_type text not null default 'daily' check (recurrence_type in ('today', 'daily', 'weekdays', 'weekends', 'custom')),
+  frequency_type text not null default 'custom',
+  required_cleans_per_day int not null default 1,
+  interval_minutes int,
+  start_time text not null default '08:00',
+  end_time text not null default '17:00',
+  shift text,
+  checklist_template_id uuid,
+  checklist_template_name text,
+  require_photo boolean not null default false,
+  notes text,
+  is_active boolean not null default true,
+  last_generated_date date,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz,
+  archived_at timestamptz
+);
+create index if not exists cleaning_schedules_site_idx on cleaning_schedules (site_id);
+
+create table if not exists schedule_areas (
+  id uuid primary key default gen_random_uuid(),
+  schedule_id uuid not null references cleaning_schedules(id) on delete cascade,
+  area_id uuid not null references areas(id) on delete cascade,
+  sort_order int not null default 0
+);
+create index if not exists schedule_areas_schedule_idx on schedule_areas (schedule_id);
+
+create table if not exists schedule_breaks (
+  id uuid primary key default gen_random_uuid(),
+  schedule_id uuid not null references cleaning_schedules(id) on delete cascade,
+  break_start text not null,
+  break_end text not null,
+  label text
+);
+
 create table if not exists assignments (
   id uuid primary key default gen_random_uuid(),
   site_id uuid not null references sites(id) on delete cascade,
@@ -174,8 +219,18 @@ create table if not exists assignments (
   created_by_name text,
   -- Copied from the template at creation time (same versioning rule as template_id): staff
   -- can't mark this clean without an "after" proof photo.
-  require_photo boolean not null default false
+  require_photo boolean not null default false,
+  -- Scheduled-clean occurrences are ordinary assignments tagged with their schedule +
+  -- occurrence number ("Clean 2 of 4"). Null for one-off / recurring-area tasks.
+  schedule_id uuid references cleaning_schedules(id) on delete set null,
+  occurrence_number int,
+  occurrence_total int,
+  scheduled_date date
 );
+-- Idempotent occurrence generation: one row per schedule/area/occurrence/day.
+create unique index if not exists assignments_occurrence_key
+  on assignments (schedule_id, area_id, occurrence_number, scheduled_date)
+  where schedule_id is not null;
 
 create table if not exists assignment_tasks (
   id uuid primary key default gen_random_uuid(),
@@ -940,6 +995,114 @@ end;
 $$;
 
 grant execute on function create_task(uuid, uuid, uuid, text, text, timestamptz, text[], uuid, text, text, int, boolean) to authenticated;
+
+-- ————— Cleaning schedules (manager+ with branch access) —————
+
+alter table cleaning_schedules enable row level security;
+alter table schedule_areas enable row level security;
+alter table schedule_breaks enable row level security;
+create policy "admins read schedules at their site" on cleaning_schedules for select
+  to authenticated using (current_admin_role(site_id) is not null);
+create policy "admins read schedule areas" on schedule_areas for select
+  to authenticated using (exists (select 1 from cleaning_schedules s where s.id = schedule_id and current_admin_role(s.site_id) is not null));
+create policy "admins read schedule breaks" on schedule_breaks for select
+  to authenticated using (exists (select 1 from cleaning_schedules s where s.id = schedule_id and current_admin_role(s.site_id) is not null));
+
+-- Creates a schedule + its areas/breaks, then generates today's occurrences as
+-- assignment rows (even-spaced across the shift window, pushed out of break times).
+-- Idempotent via the assignments_occurrence_key partial unique index.
+create or replace function create_schedule(
+  p_site_id uuid, p_name text, p_branch_id uuid, p_category_id uuid, p_assigned_user_id uuid,
+  p_recurrence_type text, p_frequency_type text, p_required_cleans int, p_interval_minutes int,
+  p_start_time text, p_end_time text, p_area_ids uuid[], p_breaks jsonb,
+  p_checklist_items text[], p_template_id uuid, p_template_name text, p_require_photo boolean,
+  p_notes text, p_shift text, p_is_active boolean, p_created_by_name text, p_generate_today boolean
+) returns setof assignments
+language plpgsql security definer set search_path = public as $$
+declare
+  v_schedule_id uuid; v_area_id uuid; v_area areas; v_i int; v_k int;
+  v_n int := greatest(1, coalesce(p_required_cleans, 1));
+  v_win_start timestamp; v_win_end timestamp; v_due timestamp;
+  v_sort int; v_label text; v_ti int; v_assignment_id uuid;
+  v_items text[]; v_break jsonb; v_today date := current_date;
+begin
+  if coalesce(current_admin_role(p_site_id), '') not in ('superuser','super_admin','manager') then
+    raise exception 'Not authorized to create schedules';
+  end if;
+  if p_branch_id is not null and not current_admin_can_access_branch(p_branch_id) then
+    raise exception 'You do not have access to that branch.';
+  end if;
+
+  insert into cleaning_schedules (site_id, name, branch_id, category_id, assigned_user_id, recurrence_type,
+    frequency_type, required_cleans_per_day, interval_minutes, start_time, end_time, shift,
+    checklist_template_id, checklist_template_name, require_photo, notes, is_active, created_by, last_generated_date)
+  values (p_site_id, p_name, p_branch_id, p_category_id, p_assigned_user_id, coalesce(p_recurrence_type,'daily'),
+    coalesce(p_frequency_type,'custom'), v_n, p_interval_minutes, coalesce(p_start_time,'08:00'),
+    coalesce(p_end_time,'17:00'), p_shift, p_template_id, p_template_name, coalesce(p_require_photo,false),
+    p_notes, coalesce(p_is_active,true), auth.uid(),
+    case when coalesce(p_generate_today,true) and coalesce(p_is_active,true) then v_today else null end)
+  returning id into v_schedule_id;
+
+  v_i := 0;
+  foreach v_area_id in array coalesce(p_area_ids, '{}') loop
+    insert into schedule_areas (schedule_id, area_id, sort_order) values (v_schedule_id, v_area_id, v_i);
+    v_i := v_i + 1;
+  end loop;
+
+  if p_breaks is not null then
+    for v_break in select * from jsonb_array_elements(p_breaks) loop
+      insert into schedule_breaks (schedule_id, break_start, break_end, label)
+      values (v_schedule_id, v_break->>'start', v_break->>'end', v_break->>'label');
+    end loop;
+  end if;
+
+  if coalesce(p_generate_today, true) and coalesce(p_is_active, true) then
+    v_win_start := v_today + p_start_time::time;
+    v_win_end := v_today + p_end_time::time;
+    if v_win_end <= v_win_start then v_win_end := v_win_start + interval '8 hours'; end if;
+    select coalesce(max(sort_order),0) into v_sort from assignments where site_id = p_site_id;
+
+    foreach v_area_id in array coalesce(p_area_ids, '{}') loop
+      select * into v_area from areas where id = v_area_id and site_id = p_site_id and active;
+      continue when v_area.id is null;
+      if array_length(p_checklist_items,1) > 0 then v_items := p_checklist_items;
+      else select array(select jsonb_array_elements_text(v_area.task_template)) into v_items; end if;
+
+      for v_k in 1..v_n loop
+        v_due := v_win_start + (v_win_end - v_win_start) * (v_k::numeric / v_n);
+        if p_breaks is not null then
+          for v_break in select * from jsonb_array_elements(p_breaks) loop
+            if v_due::time >= (v_break->>'start')::time and v_due::time < (v_break->>'end')::time then
+              v_due := v_today + (v_break->>'end')::time;
+            end if;
+          end loop;
+        end if;
+        v_sort := v_sort + 1;
+        insert into assignments (site_id, branch_id, area_id, area_name, area_code, staff_id, status, due_at,
+          sort_order, task_type, template_id, template_name, created_by_name, require_photo,
+          schedule_id, occurrence_number, occurrence_total, scheduled_date)
+        values (p_site_id, coalesce(p_branch_id, v_area.branch_id), v_area.id, v_area.name, v_area.code,
+          p_assigned_user_id, 'todo', v_due::timestamptz, v_sort, 'cleaning', p_template_id, p_template_name,
+          p_created_by_name, coalesce(p_require_photo,false), v_schedule_id, v_k, v_n, v_today)
+        on conflict (schedule_id, area_id, occurrence_number, scheduled_date) where schedule_id is not null do nothing
+        returning id into v_assignment_id;
+
+        if v_assignment_id is not null then
+          v_ti := 0;
+          foreach v_label in array coalesce(v_items, '{}') loop
+            insert into assignment_tasks (assignment_id, label, completed, sort_order) values (v_assignment_id, v_label, false, v_ti);
+            v_ti := v_ti + 1;
+          end loop;
+        end if;
+      end loop;
+    end loop;
+  end if;
+
+  return query select * from assignments where schedule_id = v_schedule_id and scheduled_date = v_today
+    order by area_name, occurrence_number;
+end;
+$$;
+grant execute on function create_schedule(uuid, text, uuid, uuid, uuid, text, text, int, int, text, text, uuid[], jsonb, text[], uuid, text, boolean, text, text, boolean, text, boolean) to authenticated;
 
 -- Edit a not-yet-completed task's type/priority/due date. Null args leave a field unchanged;
 -- p_clear_due=true explicitly nulls the due date (distinct from "leave it alone").

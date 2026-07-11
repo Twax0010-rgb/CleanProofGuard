@@ -6,6 +6,7 @@ import type {
   AuditLogEntry,
   Branch,
   BranchStatus,
+  CleaningSchedule,
   ImportBatch,
   Issue,
   IssueSeverity,
@@ -91,6 +92,37 @@ export interface SaveReportTemplateInput {
   sortBy: string | null
   groupBy: string | null
   shared: boolean
+}
+
+export interface ScheduleBreakInput {
+  start: string
+  end: string
+  label?: string | null
+}
+
+export interface CreateScheduleInput {
+  name: string
+  branchId: string | null
+  categoryId: string | null
+  assignedUserId: string | null
+  recurrenceType: CleaningSchedule['recurrenceType']
+  frequencyType: string
+  requiredCleansPerDay: number
+  intervalMinutes: number | null
+  startTime: string
+  endTime: string
+  shift: string | null
+  areaIds: string[]
+  breaks: ScheduleBreakInput[]
+  /** Explicit checklist for every occurrence; empty falls back to each area's own template. */
+  checklistItems: string[]
+  templateId: string | null
+  templateName: string | null
+  requirePhoto: boolean
+  notes: string | null
+  isActive: boolean
+  /** Generate today's occurrences now (false = save the definition only, e.g. draft). */
+  generateToday: boolean
 }
 
 export interface CreateTaskInput {
@@ -344,6 +376,8 @@ export interface DataRepo {
   saveTaskTemplate(siteId: string, input: SaveTaskTemplateInput): Promise<TaskTemplate>
   /** Creates one assignment per selected staff member (or a single unassigned one if none selected). Checklist/type/priority are copied onto each assignment, so later template edits never change history. */
   createTask(siteId: string, input: CreateTaskInput, createdByName: string): Promise<Assignment[]>
+  /** Creates a recurring cleaning schedule and generates today's occurrences (as assignment rows). Returns the generated occurrences. Manager+ with branch access. */
+  createSchedule(siteId: string, input: CreateScheduleInput, createdByName: string): Promise<Assignment[]>
   /** Moves a completed task back to Pending. Requires a reason, which is recorded in the audit trail. Throws if the assignment isn't currently done. */
   reopenAssignment(assignmentId: string, reason: string): Promise<Assignment>
   /** Edits a not-yet-completed task's type/priority/due date. Throws if the assignment is already done. */

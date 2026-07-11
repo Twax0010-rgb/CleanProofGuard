@@ -21,9 +21,9 @@ import type {
   TaskTemplate,
 } from '../types'
 import { DEMO_ADMIN_PASSWORD, SITE_ID, buildSeed } from './seed'
-import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput } from './types'
+import type { CreateAdminInput, CreateBranchInput, CreateScheduleInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput } from './types'
 
-const STORAGE_KEY = 'cpg_mock_state_v16'
+const STORAGE_KEY = 'cpg_mock_state_v17'
 const MAX_STATE_AGE_MS = 12 * 60 * 60 * 1000 // reseed if the demo has gone stale (e.g. next day)
 
 interface PersistedState {
@@ -258,7 +258,7 @@ function buildAssignmentFor(
   staffId: string | null,
   sortOrder: number,
   dueAt: string | null,
-  overrides: Partial<Pick<Assignment, 'priority' | 'taskType' | 'templateId' | 'templateName' | 'createdByName' | 'tasks' | 'requirePhoto'>> = {},
+  overrides: Partial<Pick<Assignment, 'priority' | 'taskType' | 'templateId' | 'templateName' | 'createdByName' | 'tasks' | 'requirePhoto' | 'scheduleId' | 'occurrenceNumber' | 'occurrenceTotal'>> = {},
 ): Assignment {
   return {
     id: uid(`${area.id}-cycle`),
@@ -289,6 +289,9 @@ function buildAssignmentFor(
     templateName: overrides.templateName ?? null,
     createdByName: overrides.createdByName ?? null,
     requirePhoto: overrides.requirePhoto ?? false,
+    scheduleId: overrides.scheduleId ?? null,
+    occurrenceNumber: overrides.occurrenceNumber ?? null,
+    occurrenceTotal: overrides.occurrenceTotal ?? null,
   }
 }
 
@@ -979,6 +982,54 @@ export const mockRepo: DataRepo = {
       created.push(assignment)
     }
     logAction(siteId, 'task_created', area.name, `${created.length} assignment${created.length === 1 ? '' : 's'} · ${createdByName}`)
+    persist()
+    return delay(created)
+  },
+
+  async createSchedule(siteId, input: CreateScheduleInput, createdByName) {
+    requireAdmin((a) => a.role === 'superuser' || a.role === 'super_admin' || a.role === 'manager', 'create a schedule')
+    const scheduleId = uid('schedule')
+    const n = Math.max(1, input.requiredCleansPerDay)
+    const created: Assignment[] = []
+    if (input.generateToday && input.isActive) {
+      const day = new Date()
+      const [sh, sm] = input.startTime.split(':').map(Number)
+      const [eh, em] = input.endTime.split(':').map(Number)
+      const winStart = new Date(day); winStart.setHours(sh, sm, 0, 0)
+      let winEnd = new Date(day); winEnd.setHours(eh, em, 0, 0)
+      if (winEnd <= winStart) winEnd = new Date(winStart.getTime() + 8 * 3600_000)
+      let maxSort = Math.max(0, ...state.assignments.filter((a) => a.siteId === siteId).map((a) => a.sortOrder))
+      for (const areaId of input.areaIds) {
+        const area = state.areas.find((a) => a.id === areaId && a.active)
+        if (!area) continue
+        const items = input.checklistItems.length > 0 ? input.checklistItems : area.taskTemplate
+        for (let k = 1; k <= n; k++) {
+          let due = new Date(winStart.getTime() + ((winEnd.getTime() - winStart.getTime()) * k) / n)
+          for (const b of input.breaks) {
+            const [bsh, bsm] = b.start.split(':').map(Number)
+            const [beh, bem] = b.end.split(':').map(Number)
+            const bs = new Date(day); bs.setHours(bsh, bsm, 0, 0)
+            const be = new Date(day); be.setHours(beh, bem, 0, 0)
+            if (due >= bs && due < be) due = be
+          }
+          maxSort += 1
+          const a = buildAssignmentFor(area, input.assignedUserId, maxSort, due.toISOString(), {
+            taskType: 'cleaning',
+            templateId: input.templateId,
+            templateName: input.templateName,
+            createdByName,
+            tasks: checklistFromLabels(items),
+            requirePhoto: input.requirePhoto,
+            scheduleId,
+            occurrenceNumber: k,
+            occurrenceTotal: n,
+          })
+          state.assignments = [...state.assignments, a]
+          created.push(a)
+        }
+      }
+    }
+    logAction(siteId, 'schedule_created', input.name, `${created.length} occurrence${created.length === 1 ? '' : 's'} · ${createdByName}`)
     persist()
     return delay(created)
   },

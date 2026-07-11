@@ -1,7 +1,7 @@
 import { colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
 import { supabase } from '../supabaseClient'
 import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Branch, BranchStatus, ChecklistTask, ImportBatch, Issue, LocationCategory, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
-import type { CreateAdminInput, CreateBranchInput, CreateStaffInput, CreateTaskInput, DataRepo, ImportAreaRow, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput, UpdateTaskInput } from './types'
+import type { CreateAdminInput, CreateBranchInput, CreateScheduleInput, CreateStaffInput, CreateTaskInput, DataRepo, ImportAreaRow, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput, UpdateTaskInput } from './types'
 
 /** Turn a raw Postgres/RPC error into the friendly duplicate messages the UI expects. */
 function friendlyAdminError(message: string, email: string, staffCode: string): string {
@@ -258,6 +258,9 @@ function mapAssignment(row: Record<string, unknown>): Assignment {
     templateName: (row.template_name as string) ?? null,
     createdByName: (row.created_by_name as string) ?? null,
     requirePhoto: (row.require_photo as boolean) ?? false,
+    scheduleId: (row.schedule_id as string) ?? null,
+    occurrenceNumber: (row.occurrence_number as number) ?? null,
+    occurrenceTotal: (row.occurrence_total as number) ?? null,
   }
 }
 
@@ -966,6 +969,38 @@ export const supabaseRepo: DataRepo = {
       nextSortOrder++
     }
     await logAudit(siteId, 'task_created', areaName, `${created.length} assignment${created.length === 1 ? '' : 's'} · ${createdByName}`)
+    return created
+  },
+
+  async createSchedule(siteId, input: CreateScheduleInput, createdByName) {
+    const { data, error } = await client().rpc('create_schedule', {
+      p_site_id: siteId,
+      p_name: input.name,
+      p_branch_id: input.branchId,
+      p_category_id: input.categoryId,
+      p_assigned_user_id: input.assignedUserId,
+      p_recurrence_type: input.recurrenceType,
+      p_frequency_type: input.frequencyType,
+      p_required_cleans: input.requiredCleansPerDay,
+      p_interval_minutes: input.intervalMinutes,
+      p_start_time: input.startTime,
+      p_end_time: input.endTime,
+      p_area_ids: input.areaIds,
+      p_breaks: input.breaks,
+      p_checklist_items: input.checklistItems,
+      p_template_id: input.templateId,
+      p_template_name: input.templateName,
+      p_require_photo: input.requirePhoto,
+      p_notes: input.notes,
+      p_shift: input.shift,
+      p_is_active: input.isActive,
+      p_created_by_name: createdByName,
+      p_generate_today: input.generateToday,
+    })
+    if (error) throw new Error(error.message)
+    const rows = (data as Record<string, unknown>[]) ?? []
+    const created = rows.map(mapAssignment)
+    await logAudit(siteId, 'schedule_created', input.name, `${created.length} occurrence${created.length === 1 ? '' : 's'} · ${createdByName}`)
     return created
   },
 

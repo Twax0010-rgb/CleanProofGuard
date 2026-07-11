@@ -71,6 +71,11 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   category_deleted: 'Deleted category',
   area_category_changed: 'Changed area category',
   category_reassigned: 'Reassigned category',
+  schedule_created: 'Created schedule',
+  schedule_updated: 'Edited schedule',
+  schedule_paused: 'Paused schedule',
+  schedule_archived: 'Archived schedule',
+  schedule_restored: 'Restored schedule',
 }
 
 /** South Africa's nine provinces — offered as a dropdown so branch records never carry typos. */

@@ -561,6 +561,9 @@ export function buildSeed(): {
       templateName: null,
       createdByName: null,
       requirePhoto: false,
+      scheduleId: null,
+      occurrenceNumber: null,
+      occurrenceTotal: null,
     }
   })
 

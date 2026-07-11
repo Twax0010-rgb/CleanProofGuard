@@ -1,7 +1,55 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-11 sixth session, for the next session)
-**No task in progress.** Newest work — **editable location categories + Live Map grouped by
+## ⏸ Where we left off (2026-07-11 seventh session, for the next session)
+**IN PROGRESS — big multi-part spec being built in slices.** The user asked for a large
+"Scheduled tasks + benchmarks + schedule management + scheduled-clean reports" feature PLUS a
+separate "transit/inactive-time tracking" feature PLUS a flexible report builder. They chose to
+build **Scheduled tasks core FIRST**. This session delivered that core; the rest is still TODO
+(see "Remaining from this spec" below).
+
+**Done this session — Scheduled tasks core** (verified in the browser against Supabase as thando@):
+- **"Schedule task" button beside "Create task"** on the Assign Today's Routes board, opening a
+  **Create Schedule modal** (`src/admin/ScheduleTaskModal.tsx`): schedule name, branch, location
+  category (filters areas), area multi-select with search + floor filter + **Room 1→10 range
+  picker**, assign-to-staff or leave Unassigned, shift (day/night/custom → start/end time), break
+  windows, frequency (once/twice/every 2h/every 4h/custom N), recurrence, checklist template,
+  photo-required toggle, notes, plus a live "generates N×M = X occurrences" preview and a
+  **benchmark hint** per category (e.g. "Restrooms 4×/day", static map for now).
+- **Occurrences are generated as ordinary `assignments` rows** tagged with `schedule_id` +
+  `occurrence_number`/`occurrence_total` + `scheduled_date` (new columns). So they flow through the
+  existing board / staff app / proof / reports for free. Each occurrence is a separate card
+  ("Clean 2 of 4") that completes independently. Board cards now show a **Scheduled / One-off**
+  label and an **N/total** badge.
+- **New tables** `cleaning_schedules`, `schedule_areas`, `schedule_breaks` (migrations
+  `cleaning_schedules`, `create_schedule_rpc`). RPC `create_schedule(...)` (manager+ with branch
+  access) inserts the schedule + areas + breaks and generates today's occurrences evenly spaced
+  across the shift, pushed out of break windows, idempotent via a partial unique index
+  `assignments_occurrence_key`. schema.sql mirrors all of it. Mock repo mirrors generation
+  (storage key bumped to `cpg_mock_state_v17`).
+- Verified: button present; modal opens; category→areas filter; benchmark banner + "Use 4×/day";
+  tick 2 restrooms; preview "4 × 2 = 8"; Create → 8 occurrences under Marcus Bell (Clean 1–4 of 4
+  each, spaced 10:15/12:30/14:45/17:00 avoiding the 13:00–13:30 lunch); marking occurrence 1 done
+  leaves 2–4 pending (independent completion). A demo schedule "Morning restroom clean" is left in
+  the live DB so you can see it on the board.
+
+**Remaining from this spec (NOT built yet — next slices, in the user's stated priority order):**
+1. Benchmarks: editable `cleaning_benchmarks` table + Superuser management UI + override logging
+   (currently only a static benchmark hint in the modal).
+2. Schedules management page (Schedules tab under Assignments: view/edit/pause/archive/duplicate/
+   reassign; last-generated/next-generation/completion-rate).
+3. Daily occurrence regeneration (currently only "today" is generated at create time; needs a cron/
+   edge function to roll schedules forward each day and mark missed occurrences).
+4. Scheduled-Clean report + the flexible report builder (selectable fields, CSV/Excel/**PDF**,
+   presets, branch-scoped) and the "everything reportable" report-type list.
+5. Staff-app scheduled-task view polish (occurrence count / due-by labels).
+6. The entire **Transit / inactive-time tracking** feature (activity events, transit periods,
+   dashboard cards, board idle labels, thresholds, redeployment suggestions, transit reports).
+Multi-staff "split" schedules and the separate `schedule_occurrences`/`proof_logs` tables from the
+spec were intentionally NOT created — occurrences reuse `assignments` (simpler, and behaviourally
+identical). Reconsider if the reports need a dedicated occurrences table.
+
+## Previous session (2026-07-11, sixth session)
+**No task in progress.** **Editable location categories + Live Map grouped by
 category**. Verified in the browser against Supabase as thando@ (superuser):
 - **New `location_categories` table** (global or branch-scoped; name/slug/description/icon/color/
   sort_order/is_active + archived_at/by + created_by). Seeded 12 defaults for the demo site
