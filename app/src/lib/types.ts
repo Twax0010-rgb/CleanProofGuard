@@ -243,6 +243,7 @@ export interface CleaningSchedule {
   notes: string | null
   isActive: boolean
   areaIds: string[]
+  lastGeneratedDate: string | null
   createdAt: string
   archivedAt: string | null
 }

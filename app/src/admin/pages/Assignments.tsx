@@ -9,12 +9,13 @@ import { canManageTemplates, activeStaff, canManageRoutes, effectiveStatus, form
 import { repo } from '../../lib/repo'
 import { filterAssignmentsInRange, formatDateRangeLabel, resolveDateRange } from '../../lib/reports'
 import type { DateRange } from '../../lib/reports'
-import type { Area, Assignment, Benchmark, LocationCategory, Staff, TaskPriority, TaskTemplate, TaskType } from '../../lib/types'
+import type { Area, Assignment, Benchmark, CleaningSchedule, LocationCategory, Staff, TaskPriority, TaskTemplate, TaskType } from '../../lib/types'
 import { Field, inputCls } from '../../components/ui/Modal'
 import { AdminLayout } from '../AdminLayout'
 import { CreateTaskModal } from '../CreateTaskModal'
 import { ManageTaskTemplatesModal } from '../ManageTaskTemplatesModal'
 import { ScheduleTaskModal } from '../ScheduleTaskModal'
+import { SchedulesPanel } from './SchedulesPanel'
 
 const UNASSIGNED = '__unassigned__'
 
@@ -43,7 +44,9 @@ export function Assignments() {
   const [areas, setAreas] = useState<Area[]>([])
   const [categories, setCategories] = useState<LocationCategory[]>([])
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([])
+  const [schedules, setSchedules] = useState<CleaningSchedule[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
+  const [view, setView] = useState<'board' | 'schedules'>('board')
   const [loading, setLoading] = useState(true)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [published, setPublished] = useState(false)
@@ -70,13 +73,15 @@ export function Assignments() {
         repo.listTaskTemplates(admin!.siteId),
         repo.listCategories(admin!.siteId),
         repo.listBenchmarks(admin!.siteId),
-      ]).then(([a, s, ar, t, c, bm]) => {
+        repo.listSchedules(admin!.siteId),
+      ]).then(([a, s, ar, t, c, bm, sch]) => {
         setAssignments(a)
         setStaff(s)
         setAreas(ar)
         setTemplates(t)
         setCategories(c)
         setBenchmarks(bm)
+        setSchedules(sch)
         setLoading(false)
       })
     }
@@ -186,8 +191,20 @@ export function Assignments() {
           {isToday ? "Assign today's routes" : 'Route history'}
         </h2>
         <span className="text-sm text-muted">{activeBranch ? activeBranch.name : 'All branches'} · {formatDateRangeLabel(range)}</span>
+        <div className="ml-3 flex gap-1 rounded-full border border-line bg-app p-0.5">
+          {(['board', 'schedules'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${view === v ? 'bg-white text-ink shadow-sm' : 'text-ink-soft'}`}
+            >
+              {v === 'board' ? 'Board' : 'Schedules'}
+            </button>
+          ))}
+        </div>
         <div className="flex-1" />
-        {published && <span className="text-sm font-semibold text-verified-ink">Routes published ✓</span>}
+        {view === 'board' && published && <span className="text-sm font-semibold text-verified-ink">Routes published ✓</span>}
+        {view === 'board' && (<>
         <DateRangePicker value={range} onChange={setRange} />
         {canManageRoutes(admin.role) && (
           <>
@@ -231,8 +248,21 @@ export function Assignments() {
         ) : (
           <span className="text-xs text-ink-soft">Your role is read-only — viewing routes, can't reassign.</span>
         )}
+        </>)}
       </div>
 
+      {view === 'schedules' ? (
+        <SchedulesPanel
+          admin={admin}
+          schedules={schedules}
+          assignments={assignments}
+          staff={staff}
+          areas={areas}
+          categories={categories}
+          branches={branches}
+          onChanged={() => repo.listSchedules(admin.siteId).then(setSchedules)}
+        />
+      ) : (
       <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="flex flex-1 items-start gap-4 overflow-auto p-5">
           {/* Sticky so the pool of unassigned work stays in view while scrolling across staff —
@@ -321,6 +351,7 @@ export function Assignments() {
 
         <DragOverlay>{activeAssignment && <Card assignment={activeAssignment} overlay />}</DragOverlay>
       </DndContext>
+      )}
 
       {pendingReassign && (
         <ModalShell

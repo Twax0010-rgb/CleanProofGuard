@@ -1127,6 +1127,78 @@ end;
 $$;
 grant execute on function create_schedule(uuid, text, uuid, uuid, uuid, text, text, int, int, text, text, uuid[], jsonb, text[], uuid, text, boolean, text, text, boolean, text, boolean) to authenticated;
 
+-- Manage schedules: edit / pause / archive / duplicate (manager+ with branch access).
+create or replace function admin_can_manage_schedule(p_schedule_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from cleaning_schedules s
+    where s.id = p_schedule_id
+      and coalesce(current_admin_role(s.site_id), '') in ('superuser','super_admin','manager')
+      and (s.branch_id is null or current_admin_can_access_branch(s.branch_id))
+  )
+$$;
+
+create or replace function update_schedule(
+  p_id uuid, p_name text, p_assigned_user_id uuid, p_required_cleans int, p_frequency_type text,
+  p_interval_minutes int, p_recurrence_type text, p_start_time text, p_end_time text,
+  p_require_photo boolean, p_notes text, p_area_ids uuid[]
+)
+returns setof cleaning_schedules language plpgsql security definer set search_path = public as $$
+declare v_i int := 0; v_area uuid;
+begin
+  if not admin_can_manage_schedule(p_id) then raise exception 'Not authorized to edit this schedule'; end if;
+  update cleaning_schedules set
+    name = coalesce(nullif(trim(p_name),''), name), assigned_user_id = p_assigned_user_id,
+    required_cleans_per_day = coalesce(p_required_cleans, required_cleans_per_day),
+    frequency_type = coalesce(p_frequency_type, frequency_type), interval_minutes = p_interval_minutes,
+    recurrence_type = coalesce(p_recurrence_type, recurrence_type), start_time = coalesce(p_start_time, start_time),
+    end_time = coalesce(p_end_time, end_time), require_photo = coalesce(p_require_photo, require_photo),
+    notes = p_notes, updated_at = now()
+  where id = p_id;
+  if p_area_ids is not null then
+    delete from schedule_areas where schedule_id = p_id;
+    foreach v_area in array p_area_ids loop
+      insert into schedule_areas (schedule_id, area_id, sort_order) values (p_id, v_area, v_i);
+      v_i := v_i + 1;
+    end loop;
+  end if;
+  return query select * from cleaning_schedules where id = p_id;
+end; $$;
+
+create or replace function set_schedule_status(p_id uuid, p_is_active boolean, p_archived boolean)
+returns setof cleaning_schedules language plpgsql security definer set search_path = public as $$
+begin
+  if not admin_can_manage_schedule(p_id) then raise exception 'Not authorized to change this schedule'; end if;
+  return query
+  update cleaning_schedules set is_active = p_is_active,
+    archived_at = case when p_archived then now() else null end, updated_at = now()
+  where id = p_id returning *;
+end; $$;
+
+create or replace function duplicate_schedule(p_id uuid)
+returns setof cleaning_schedules language plpgsql security definer set search_path = public as $$
+declare v_new uuid;
+begin
+  if not admin_can_manage_schedule(p_id) then raise exception 'Not authorized to duplicate this schedule'; end if;
+  insert into cleaning_schedules (site_id, name, branch_id, category_id, assigned_user_id, recurrence_type,
+    frequency_type, required_cleans_per_day, interval_minutes, start_time, end_time, shift,
+    checklist_template_id, checklist_template_name, require_photo, notes, is_active, created_by, last_generated_date)
+  select site_id, name || ' (copy)', branch_id, category_id, assigned_user_id, recurrence_type,
+    frequency_type, required_cleans_per_day, interval_minutes, start_time, end_time, shift,
+    checklist_template_id, checklist_template_name, require_photo, notes, false, auth.uid(), null
+  from cleaning_schedules where id = p_id returning id into v_new;
+  insert into schedule_areas (schedule_id, area_id, sort_order)
+    select v_new, area_id, sort_order from schedule_areas where schedule_id = p_id;
+  insert into schedule_breaks (schedule_id, break_start, break_end, label)
+    select v_new, break_start, break_end, label from schedule_breaks where schedule_id = p_id;
+  return query select * from cleaning_schedules where id = v_new;
+end; $$;
+
+grant execute on function admin_can_manage_schedule(uuid) to authenticated;
+grant execute on function update_schedule(uuid, text, uuid, int, text, int, text, text, text, boolean, text, uuid[]) to authenticated;
+grant execute on function set_schedule_status(uuid, boolean, boolean) to authenticated;
+grant execute on function duplicate_schedule(uuid) to authenticated;
+
 -- ————— Cleaning benchmarks (superuser, or benchmarks.manage grant) —————
 
 alter table cleaning_benchmarks enable row level security;

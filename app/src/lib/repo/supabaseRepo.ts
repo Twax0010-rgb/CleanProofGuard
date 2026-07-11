@@ -1,6 +1,6 @@
 import { colorForName, formatFrequency, generateAreaCode, generateStaffCode, initialsFrom } from '../domain'
 import { supabase } from '../supabaseClient'
-import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Benchmark, Branch, BranchStatus, ChecklistTask, ImportBatch, Issue, LocationCategory, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
+import type { AdminUser, Area, Assignment, AuditAction, AuditLogEntry, Benchmark, Branch, BranchStatus, ChecklistTask, CleaningSchedule, ImportBatch, Issue, LocationCategory, PhotoReviewStatus, ProofPhoto, ProofPhotoView, ReportTemplate, ReportType, Staff, TaskTemplate } from '../types'
 import type { CreateAdminInput, CreateBranchInput, CreateScheduleInput, CreateStaffInput, CreateTaskInput, DataRepo, ImportAreaRow, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBranchInput, UpdateStaffInput, UpdateTaskInput } from './types'
 
 /** Turn a raw Postgres/RPC error into the friendly duplicate messages the UI expects. */
@@ -155,6 +155,32 @@ function mapAdmin(row: Record<string, unknown>, email: string): AdminUser {
     branchIds: (row.branch_ids as string[]) ?? [],
     defaultBranchId: (row.default_branch_id as string) ?? null,
     permissions: (row.permissions as AdminUser['permissions']) ?? {},
+  }
+}
+
+function mapSchedule(row: Record<string, unknown>): CleaningSchedule {
+  const areas = (row.schedule_areas as Record<string, unknown>[]) ?? []
+  return {
+    id: row.id as string,
+    siteId: row.site_id as string,
+    name: row.name as string,
+    branchId: (row.branch_id as string) ?? null,
+    categoryId: (row.category_id as string) ?? null,
+    assignedUserId: (row.assigned_user_id as string) ?? null,
+    recurrenceType: (row.recurrence_type as CleaningSchedule['recurrenceType']) ?? 'daily',
+    frequencyType: (row.frequency_type as string) ?? 'custom',
+    requiredCleansPerDay: (row.required_cleans_per_day as number) ?? 1,
+    intervalMinutes: (row.interval_minutes as number) ?? null,
+    startTime: (row.start_time as string) ?? '08:00',
+    endTime: (row.end_time as string) ?? '17:00',
+    shift: (row.shift as string) ?? null,
+    requirePhoto: (row.require_photo as boolean) ?? false,
+    notes: (row.notes as string) ?? null,
+    isActive: (row.is_active as boolean) ?? true,
+    areaIds: areas.map((a) => a.area_id as string),
+    lastGeneratedDate: (row.last_generated_date as string) ?? null,
+    createdAt: (row.created_at as string) ?? new Date().toISOString(),
+    archivedAt: (row.archived_at as string) ?? null,
   }
 }
 
@@ -1084,6 +1110,60 @@ export const supabaseRepo: DataRepo = {
     const created = rows.map(mapAssignment)
     await logAudit(siteId, 'schedule_created', input.name, `${created.length} occurrence${created.length === 1 ? '' : 's'} · ${createdByName}`)
     return created
+  },
+
+  async listSchedules(siteId) {
+    const { data, error } = await client()
+      .from('cleaning_schedules')
+      .select('*, schedule_areas(area_id)')
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return (data ?? []).map(mapSchedule)
+  },
+
+  async updateSchedule(scheduleId, patch) {
+    const { data, error } = await client().rpc('update_schedule', {
+      p_id: scheduleId,
+      p_name: patch.name ?? null,
+      p_assigned_user_id: patch.assignedUserId ?? null,
+      p_required_cleans: patch.requiredCleansPerDay ?? null,
+      p_frequency_type: patch.frequencyType ?? null,
+      p_interval_minutes: patch.intervalMinutes ?? null,
+      p_recurrence_type: patch.recurrenceType ?? null,
+      p_start_time: patch.startTime ?? null,
+      p_end_time: patch.endTime ?? null,
+      p_require_photo: patch.requirePhoto ?? null,
+      p_notes: patch.notes ?? null,
+      p_area_ids: patch.areaIds ?? null,
+    })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const { data: full } = await client().from('cleaning_schedules').select('*, schedule_areas(area_id)').eq('id', row.id).maybeSingle()
+    const schedule = mapSchedule(full ?? row)
+    await logAudit(schedule.siteId, 'schedule_updated', schedule.name)
+    return schedule
+  },
+
+  async setScheduleStatus(scheduleId, isActive, archived) {
+    const { data, error } = await client().rpc('set_schedule_status', { p_id: scheduleId, p_is_active: isActive, p_archived: archived })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    const schedule = mapSchedule(row)
+    const action: AuditAction = archived ? 'schedule_archived' : !isActive ? 'schedule_paused' : 'schedule_restored'
+    await logAudit(schedule.siteId, action, schedule.name)
+    return schedule
+  },
+
+  async duplicateSchedule(scheduleId) {
+    const { data, error } = await client().rpc('duplicate_schedule', { p_id: scheduleId })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    // Fetch the copied areas for the new schedule.
+    const { data: full } = await client().from('cleaning_schedules').select('*, schedule_areas(area_id)').eq('id', row.id).maybeSingle()
+    const schedule = mapSchedule(full ?? row)
+    await logAudit(schedule.siteId, 'schedule_updated', `${schedule.name}`, 'duplicated')
+    return schedule
   },
 
   async reopenAssignment(assignmentId, reason) {

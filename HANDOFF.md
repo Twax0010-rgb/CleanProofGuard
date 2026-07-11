@@ -46,11 +46,21 @@ bumped to `cpg_mock_state_v18`. Verified in browser: 7 benchmarks list; edited B
 reverted); Schedule modal shows the live value. Audit actions added: benchmark_created/updated/
 archived/restored/deleted/overridden.
 
+**Schedules management page — DONE (2026-07-11 session 7c):** a **"Board / Schedules" tab toggle**
+on the Assign Today's Routes page. The Schedules view (`SchedulesPanel.tsx`) lists every schedule
+with status/search filters, showing name, branch, category, area count, assigned staff, frequency
+(N×/day), recurrence + next-generation date, and **today's completion (done/total occurrences)**.
+Manager+ can Edit (name/assignee/cleans/recurrence/times/photo/notes/areas), Pause/Resume,
+Duplicate, Archive/Restore. Backend: `update_schedule` / `set_schedule_status` / `duplicate_schedule`
+RPCs + `admin_can_manage_schedule` (manager+ w/ branch access) — migration `schedule_management_rpcs`,
+schema.sql mirrored. Mock now stores schedule definitions (`state.schedules`, key
+`cpg_mock_state_v19`; `CleaningSchedule` gained `lastGeneratedDate`). Verified in browser: list with
+0/8 completion, Pause, Duplicate, Edit cleans 4→3; test copy removed + original restored.
+
 **Remaining from this spec (NOT built yet — next slices, in the user's stated priority order):**
-1. Schedules management page (Schedules tab under Assignments: view/edit/pause/archive/duplicate/
-   reassign; last-generated/next-generation/completion-rate).
-3. Daily occurrence regeneration (currently only "today" is generated at create time; needs a cron/
-   edge function to roll schedules forward each day and mark missed occurrences).
+1. Daily occurrence regeneration (currently only "today" is generated at create time; needs a cron/
+   edge function to roll active schedules forward each day and mark missed occurrences). schema has
+   `last_generated_date` ready; a generator RPC + scheduled task would complete it.
 4. Scheduled-Clean report + the flexible report builder (selectable fields, CSV/Excel/**PDF**,
    presets, branch-scoped) and the "everything reportable" report-type list.
 5. Staff-app scheduled-task view polish (occurrence count / due-by labels).

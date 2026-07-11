@@ -10,6 +10,7 @@ import type {
   BranchStatus,
   Benchmark,
   ChecklistTask,
+  CleaningSchedule,
   ImportBatch,
   Issue,
   IssueSeverity,
@@ -24,7 +25,7 @@ import type {
 import { DEMO_ADMIN_PASSWORD, SITE_ID, buildSeed } from './seed'
 import type { CreateAdminInput, CreateBenchmarkInput, CreateBranchInput, CreateScheduleInput, CreateStaffInput, CreateTaskInput, DataRepo, ProofPhotoFilter, SaveReportTemplateInput, SaveTaskTemplateInput, UpdateAdminAccessInput, UpdateAdminInput, UpdateBenchmarkInput, UpdateBranchInput, UpdateStaffInput } from './types'
 
-const STORAGE_KEY = 'cpg_mock_state_v18'
+const STORAGE_KEY = 'cpg_mock_state_v19'
 const MAX_STATE_AGE_MS = 12 * 60 * 60 * 1000 // reseed if the demo has gone stale (e.g. next day)
 
 interface PersistedState {
@@ -36,6 +37,7 @@ interface PersistedState {
   areas: Area[]
   categories: LocationCategory[]
   benchmarks: Benchmark[]
+  schedules: CleaningSchedule[]
   assignments: Assignment[]
   /** Demo-only plaintext PIN store, keyed by staff id — Supabase mode always hashes via pgcrypto instead. */
   staffPins: Record<string, string>
@@ -1066,6 +1068,30 @@ export const mockRepo: DataRepo = {
     requireAdmin((a) => a.role === 'superuser' || a.role === 'super_admin' || a.role === 'manager', 'create a schedule')
     const scheduleId = uid('schedule')
     const n = Math.max(1, input.requiredCleansPerDay)
+    const today = new Date().toISOString().slice(0, 10)
+    const schedule: CleaningSchedule = {
+      id: scheduleId,
+      siteId,
+      name: input.name,
+      branchId: input.branchId,
+      categoryId: input.categoryId,
+      assignedUserId: input.assignedUserId,
+      recurrenceType: input.recurrenceType,
+      frequencyType: input.frequencyType,
+      requiredCleansPerDay: n,
+      intervalMinutes: input.intervalMinutes,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      shift: input.shift,
+      requirePhoto: input.requirePhoto,
+      notes: input.notes,
+      isActive: input.isActive,
+      areaIds: input.areaIds,
+      lastGeneratedDate: input.generateToday && input.isActive ? today : null,
+      createdAt: new Date().toISOString(),
+      archivedAt: null,
+    }
+    state.schedules = [...(state.schedules ?? []), schedule]
     const created: Assignment[] = []
     if (input.generateToday && input.isActive) {
       const day = new Date()
@@ -1108,6 +1134,64 @@ export const mockRepo: DataRepo = {
     logAction(siteId, 'schedule_created', input.name, `${created.length} occurrence${created.length === 1 ? '' : 's'} · ${createdByName}`)
     persist()
     return delay(created)
+  },
+
+  async listSchedules(siteId) {
+    return delay((state.schedules ?? []).filter((s) => s.siteId === siteId))
+  },
+
+  async updateSchedule(scheduleId, patch) {
+    requireAdmin((a) => a.role === 'superuser' || a.role === 'super_admin' || a.role === 'manager', 'edit a schedule')
+    const before = (state.schedules ?? []).find((s) => s.id === scheduleId)
+    if (!before) throw new Error('Schedule not found')
+    const updated: CleaningSchedule = {
+      ...before,
+      name: patch.name?.trim() || before.name,
+      assignedUserId: patch.assignedUserId !== undefined ? patch.assignedUserId : before.assignedUserId,
+      requiredCleansPerDay: patch.requiredCleansPerDay ?? before.requiredCleansPerDay,
+      frequencyType: patch.frequencyType ?? before.frequencyType,
+      intervalMinutes: patch.intervalMinutes !== undefined ? patch.intervalMinutes : before.intervalMinutes,
+      recurrenceType: patch.recurrenceType ?? before.recurrenceType,
+      startTime: patch.startTime ?? before.startTime,
+      endTime: patch.endTime ?? before.endTime,
+      requirePhoto: patch.requirePhoto ?? before.requirePhoto,
+      notes: patch.notes !== undefined ? patch.notes : before.notes,
+      areaIds: patch.areaIds ?? before.areaIds,
+    }
+    state.schedules = state.schedules.map((s) => (s.id === scheduleId ? updated : s))
+    logAction(before.siteId, 'schedule_updated', updated.name)
+    persist()
+    return delay(updated)
+  },
+
+  async setScheduleStatus(scheduleId, isActive, archived) {
+    requireAdmin((a) => a.role === 'superuser' || a.role === 'super_admin' || a.role === 'manager', 'change a schedule')
+    const before = (state.schedules ?? []).find((s) => s.id === scheduleId)
+    if (!before) throw new Error('Schedule not found')
+    const updated: CleaningSchedule = { ...before, isActive, archivedAt: archived ? new Date().toISOString() : null }
+    state.schedules = state.schedules.map((s) => (s.id === scheduleId ? updated : s))
+    logAction(before.siteId, archived ? 'schedule_archived' : !isActive ? 'schedule_paused' : 'schedule_restored', updated.name)
+    persist()
+    return delay(updated)
+  },
+
+  async duplicateSchedule(scheduleId) {
+    requireAdmin((a) => a.role === 'superuser' || a.role === 'super_admin' || a.role === 'manager', 'duplicate a schedule')
+    const before = (state.schedules ?? []).find((s) => s.id === scheduleId)
+    if (!before) throw new Error('Schedule not found')
+    const copy: CleaningSchedule = {
+      ...before,
+      id: uid('schedule'),
+      name: `${before.name} (copy)`,
+      isActive: false,
+      lastGeneratedDate: null,
+      createdAt: new Date().toISOString(),
+      archivedAt: null,
+    }
+    state.schedules = [...state.schedules, copy]
+    logAction(before.siteId, 'schedule_updated', copy.name, 'duplicated')
+    persist()
+    return delay(copy)
   },
 
   async updateTaskDetails(assignmentId, patch) {

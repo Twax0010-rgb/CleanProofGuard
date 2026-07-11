@@ -1,5 +1,5 @@
 import { placeholderPhoto } from '../domain'
-import type { AdminUser, Area, AreaCategory, Assignment, AuditLogEntry, Benchmark, Branch, ChecklistTask, ImportBatch, Issue, LocationCategory, ProofPhoto, ReportTemplate, Site, Staff, TaskTemplate } from '../types'
+import type { AdminUser, Area, AreaCategory, Assignment, AuditLogEntry, Benchmark, Branch, ChecklistTask, CleaningSchedule, ImportBatch, Issue, LocationCategory, ProofPhoto, ReportTemplate, Site, Staff, TaskTemplate } from '../types'
 
 export const SITE_ID = 'site-northgate'
 
@@ -99,6 +99,7 @@ export function buildSeed(): {
   areas: Area[]
   categories: LocationCategory[]
   benchmarks: Benchmark[]
+  schedules: CleaningSchedule[]
   assignments: Assignment[]
   staffPins: Record<string, string>
   issues: Issue[]
@@ -675,7 +676,7 @@ export function buildSeed(): {
     },
   ]
 
-  return { site, branches, staff, admins, areas, categories, benchmarks, assignments, staffPins, issues, auditLog, reportTemplates, importBatches, taskTemplates }
+  return { site, branches, staff, admins, areas, categories, benchmarks, schedules: [], assignments, staffPins, issues, auditLog, reportTemplates, importBatches, taskTemplates }
 }
 
 /** Demo credentials, surfaced in the sign-in screens' helper text. */

@@ -145,6 +145,21 @@ export interface UpdateBenchmarkInput {
   categoryId?: string | null
 }
 
+export interface UpdateScheduleInput {
+  name?: string
+  assignedUserId?: string | null
+  requiredCleansPerDay?: number
+  frequencyType?: string
+  intervalMinutes?: number | null
+  recurrenceType?: CleaningSchedule['recurrenceType']
+  startTime?: string
+  endTime?: string
+  requirePhoto?: boolean
+  notes?: string | null
+  /** Replaces the schedule's areas when provided. */
+  areaIds?: string[]
+}
+
 export interface CreateTaskInput {
   areaId: string
   /** Empty = a single unassigned task; one or more ids creates one assignment per staff member. */
@@ -408,6 +423,14 @@ export interface DataRepo {
   createTask(siteId: string, input: CreateTaskInput, createdByName: string): Promise<Assignment[]>
   /** Creates a recurring cleaning schedule and generates today's occurrences (as assignment rows). Returns the generated occurrences. Manager+ with branch access. */
   createSchedule(siteId: string, input: CreateScheduleInput, createdByName: string): Promise<Assignment[]>
+  /** All cleaning schedules at the site (active, paused, archived), each with its areaIds. */
+  listSchedules(siteId: string): Promise<CleaningSchedule[]>
+  /** Edit a schedule definition (name/assignee/frequency/recurrence/times/areas). Applies to future generations. */
+  updateSchedule(scheduleId: string, patch: UpdateScheduleInput): Promise<CleaningSchedule>
+  /** Pause/resume (isActive) and archive/restore (archived) a schedule. Paused/archived schedules stop generating. */
+  setScheduleStatus(scheduleId: string, isActive: boolean, archived: boolean): Promise<CleaningSchedule>
+  /** Copy a schedule (paused, no occurrences generated). Returns the new schedule. */
+  duplicateSchedule(scheduleId: string): Promise<CleaningSchedule>
   /** Moves a completed task back to Pending. Requires a reason, which is recorded in the audit trail. Throws if the assignment isn't currently done. */
   reopenAssignment(assignmentId: string, reason: string): Promise<Assignment>
   /** Edits a not-yet-completed task's type/priority/due date. Throws if the assignment is already done. */
