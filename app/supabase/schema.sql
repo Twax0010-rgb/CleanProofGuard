@@ -14,7 +14,9 @@
 -- authenticate_staff) and tighten these policies to check auth.uid() /
 -- auth.jwt() instead.
 
-create extension if not exists pgcrypto;
+-- Supabase installs extensions into the `extensions` schema, so functions that call
+-- crypt()/gen_salt() need it on their search_path (see authenticate_staff & friends).
+create extension if not exists pgcrypto with schema extensions;
 
 create table if not exists sites (
   id uuid primary key default gen_random_uuid(),
@@ -236,7 +238,7 @@ create or replace function authenticate_staff(p_staff_code text, p_pin text)
 returns setof staff
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   with matched as (
     select id from staff
@@ -252,6 +254,43 @@ as $$
 $$;
 
 grant execute on function authenticate_staff(text, text) to anon, authenticated;
+
+-- Staff row lookup for the staff app's session restore / status watcher: the staff
+-- app holds only the anon key (no Supabase Auth session) and the staff table's RLS
+-- is admins-only, so this security-definer RPC returns the row — minus pin_hash.
+-- Anyone holding a staff UUID (obtained via authenticate_staff) can re-read that row;
+-- same dev-grade posture as the permissive policies below.
+create or replace function get_staff_public(p_staff_id uuid)
+returns table (
+  id uuid,
+  site_id uuid,
+  branch_id uuid,
+  staff_code text,
+  full_name text,
+  initials text,
+  color_hex text,
+  role text,
+  status text,
+  account_status text,
+  email text,
+  phone text,
+  shift_start timestamptz,
+  shift_end timestamptz,
+  created_at timestamptz,
+  last_login_at timestamptz
+)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select id, site_id, branch_id, staff_code, full_name, initials, color_hex, role,
+         status, account_status, email, phone, shift_start, shift_end, created_at, last_login_at
+  from staff
+  where id = p_staff_id
+$$;
+
+grant execute on function get_staff_public(uuid) to anon, authenticated;
 
 -- Looks up the caller's permission tier (see AdminRole in src/lib/types.ts).
 -- Used by the RPCs below so each privileged action checks the *real*,
@@ -286,7 +325,7 @@ create or replace function create_staff(
 returns setof staff
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   if current_admin_role(p_site_id) not in ('superuser', 'super_admin', 'manager') then
@@ -307,7 +346,7 @@ create or replace function reset_staff_pin(p_staff_id uuid, p_new_pin text)
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_site_id uuid;
@@ -874,6 +913,12 @@ create policy "sites are readable by anyone" on sites for select using (true);
 -- public /verify page and staff anon-key writes keep working during development).
 create policy "admins read accessible branches" on branches for select
   using (current_admin_can_access_branch(id));
+-- The staff app shows the branch name in its header/proof screens but has no auth
+-- session. Scoped `to anon` only, so authenticated admins keep the branch-access-
+-- scoped policy above (policies are OR'd per role; this one never applies to them).
+create policy "staff app can read branches" on branches for select
+  to anon
+  using (true);
 create policy "branch writes go through security-definer RPCs" on branches for all
   using (false) with check (false);
 
@@ -994,11 +1039,11 @@ insert into sites (id, name) values
 on conflict (id) do nothing;
 
 insert into staff (id, site_id, staff_code, pin_hash, full_name, initials, color_hex, role, status, account_status, email, shift_start, shift_end) values
-  ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'MB-4471', crypt('1234', gen_salt('bf')), 'Marcus Bell', 'MB', '#17212B', 'Cleaner', 'on_shift', 'active', 'marcus.bell@example.com', now() - interval '3 hours', now() + interval '4 hours'),
-  ('00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000001', 'AR-2290', crypt('1234', gen_salt('bf')), 'Aisha Rahman', 'AR', '#3B7DD8', 'Cleaner', 'on_shift', 'active', 'aisha.rahman@example.com', now() - interval '3 hours 20 minutes', now() + interval '3 hours 40 minutes'),
-  ('00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000001', 'JT-1187', crypt('1234', gen_salt('bf')), 'Jamal Turner', 'JT', '#0F9D6B', 'Cleaner', 'on_shift', 'active', 'jamal.turner@example.com', now() - interval '4 hours 20 minutes', now() + interval '2 hours 40 minutes'),
-  ('00000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000001', 'DK-3355', crypt('1234', gen_salt('bf')), 'Dana Kim', 'DK', '#8A96A0', 'Cleaner', 'on_break', 'active', 'dana.kim@example.com', now() - interval '3 hours 10 minutes', now() + interval '3 hours 50 minutes'),
-  ('00000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-000000000001', 'PN-5502', crypt('1234', gen_salt('bf')), 'Priya Nair', 'PN', '#8A96A0', 'Cleaner', 'off_shift', 'disabled', 'priya.nair@example.com', null, null)
+  ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'MB-4471', extensions.crypt('1234', extensions.gen_salt('bf')), 'Marcus Bell', 'MB', '#17212B', 'Cleaner', 'on_shift', 'active', 'marcus.bell@example.com', now() - interval '3 hours', now() + interval '4 hours'),
+  ('00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000001', 'AR-2290', extensions.crypt('1234', extensions.gen_salt('bf')), 'Aisha Rahman', 'AR', '#3B7DD8', 'Cleaner', 'on_shift', 'active', 'aisha.rahman@example.com', now() - interval '3 hours 20 minutes', now() + interval '3 hours 40 minutes'),
+  ('00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000001', 'JT-1187', extensions.crypt('1234', extensions.gen_salt('bf')), 'Jamal Turner', 'JT', '#0F9D6B', 'Cleaner', 'on_shift', 'active', 'jamal.turner@example.com', now() - interval '4 hours 20 minutes', now() + interval '2 hours 40 minutes'),
+  ('00000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000001', 'DK-3355', extensions.crypt('1234', extensions.gen_salt('bf')), 'Dana Kim', 'DK', '#8A96A0', 'Cleaner', 'on_break', 'active', 'dana.kim@example.com', now() - interval '3 hours 10 minutes', now() + interval '3 hours 50 minutes'),
+  ('00000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-000000000001', 'PN-5502', extensions.crypt('1234', extensions.gen_salt('bf')), 'Priya Nair', 'PN', '#8A96A0', 'Cleaner', 'off_shift', 'disabled', 'priya.nair@example.com', null, null)
 on conflict (id) do nothing;
 
 insert into areas (id, site_id, name, code, category, frequency_minutes, task_template, last_cleaned_at) values

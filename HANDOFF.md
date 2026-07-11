@@ -1,11 +1,21 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-10, for the next session)
-**No task in progress — everything below is done and verified.** The last in-progress item (My Route
-reordering) is finished: the staff My Route screen ([app/src/staff/pages/MyRoute.tsx](app/src/staff/pages/MyRoute.tsx))
-now renders pending/next-up/overdue cards first, then a "Completed · n" divider with the done cards
-below it, plus an "All areas complete for this shift" note when nothing is pending. Verified in the
-browser (MB-4471: 8 pending on top, Completed · 7 below); `npm run build` clean.
+## ⏸ Where we left off (2026-07-11, for the next session)
+**No task in progress — everything below is done and verified.** Latest work: the project is now on
+GitHub (https://github.com/Twax0010-rgb/CleanProofGuard) and **runs against a real Supabase backend**
+(project `ezqxsdejcdxngunfebds`, eu-central-1). Three migrations applied: `initial_schema`,
+`multibranch_demo_seed` (branches, hospital staff/areas, 5 admin auth users, today's assignments),
+and `staff_app_anon_access` (`get_staff_public` RPC + anon branches read policy). `app/.env` holds the
+project URL + anon key (gitignored); delete it to fall back to mock mode. Same demo logins as mock:
+admins `demo1234`, staff PIN `1234`. Two Supabase-mode bugs were found & fixed in
+[supabaseRepo.ts](app/src/lib/repo/supabaseRepo.ts): `getStaff` now uses the `get_staff_public` RPC
+(the staff app's anon key can't pass the admins-only staff RLS), and `subscribe()` now uses a unique
+realtime channel topic per call (supabase-js returns the existing channel for a reused topic and
+throws when a second subscriber adds callbacks — this blanked the staff app after sign-in).
+`schema.sql` was updated to match what's deployed (pgcrypto lives in the `extensions` schema on
+Supabase). Both staff (MB-4471) and admin (owen@) sign-ins verified in the browser against Supabase.
+Note: seed timestamps are relative to migration time, so demo KPIs drift as days pass — re-running
+the seed (or assigning fresh work in the app) refreshes the demo.
 
 Environment notes: Node.js lives at `C:\Program Files\nodejs` but is NOT on PATH (prefix commands
 with `$env:Path = "C:\Program Files\nodejs;$env:Path"`). Run from `app/`: `npm run dev` →

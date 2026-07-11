@@ -8,6 +8,9 @@ function client() {
   return supabase
 }
 
+/** Monotonic counter so each subscribe() call gets its own realtime channel topic. */
+let subscribeSeq = 0
+
 function mapAuditLog(row: Record<string, unknown>): AuditLogEntry {
   return {
     id: row.id as string,
@@ -316,9 +319,12 @@ export const supabaseRepo: DataRepo = {
   },
 
   async getStaff(id) {
-    const { data, error } = await client().from('staff').select('*').eq('id', id).maybeSingle()
+    // Via RPC, not a direct select: the staff app holds only the anon key, and the
+    // staff table's RLS is admins-only (get_staff_public returns the row sans pin_hash).
+    const { data, error } = await client().rpc('get_staff_public', { p_staff_id: id })
     if (error) throw error
-    return data ? mapStaff(data) : null
+    const row = Array.isArray(data) ? data[0] : data
+    return row ? mapStaff(row) : null
   },
 
   async getAdmin(id) {
@@ -1107,8 +1113,11 @@ export const supabaseRepo: DataRepo = {
   },
 
   subscribe(siteId, cb) {
+    // Unique topic per subscription: supabase-js returns the existing channel for a
+    // reused topic, and adding postgres_changes callbacks to an already-subscribed
+    // channel throws — which unmounts whatever screen subscribed second.
     const channel = client()
-      .channel(`site-${siteId}-changes`)
+      .channel(`site-${siteId}-changes-${++subscribeSeq}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'assignments', filter: `site_id=eq.${siteId}` },
