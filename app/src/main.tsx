@@ -6,9 +6,13 @@ import { AdminAuthProvider } from './contexts/AdminAuthContext.tsx'
 import { BranchProvider } from './contexts/BranchContext.tsx'
 import { StaffAuthProvider } from './contexts/StaffAuthContext.tsx'
 import { initTheme } from './components/ui/ThemeToggle.tsx'
+import { initOutboxSync } from './staff/outbox.ts'
+import { initStaffPwa } from './staff/pwa.ts'
 import './index.css'
 
 initTheme()
+initStaffPwa()
+initOutboxSync()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

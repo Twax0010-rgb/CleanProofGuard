@@ -563,6 +563,33 @@ export const supabaseRepo: DataRepo = {
     return updated
   },
 
+  async listOpenAssignments(branchId) {
+    const { data, error } = await client()
+      .from('assignments')
+      .select(ASSIGNMENT_SELECT)
+      .eq('branch_id', branchId)
+      .is('staff_id', null)
+      .neq('status', 'done')
+      .order('sort_order', { ascending: true })
+    if (error) throw error
+    return (data ?? []).map(mapAssignment)
+  },
+
+  async claimAssignment(assignmentId, staffId) {
+    // Claim-once without an RPC: the `.is('staff_id', null)` filter only matches while
+    // the task is still unassigned, so a second claimer updates zero rows and gets null.
+    const { data, error } = await client()
+      .from('assignments')
+      .update({ staff_id: staffId })
+      .eq('id', assignmentId)
+      .is('staff_id', null)
+      .neq('status', 'done')
+      .select(ASSIGNMENT_SELECT)
+      .maybeSingle()
+    if (error) throw error
+    return data ? mapAssignment(data) : null
+  },
+
   async publishRoutes(siteId) {
     // No dedicated "published" state in the schema yet — routes are live as soon as
     // they're assigned. This still round-trips through a role-checked RPC so the

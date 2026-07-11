@@ -228,9 +228,25 @@ create table if not exists task_templates (
   created_at timestamptz not null default now()
 );
 
--- Storage bucket for proof photos. Create it via the dashboard (Storage → New bucket
--- → "proof-photos", public read) or:
--- insert into storage.buckets (id, name, public) values ('proof-photos', 'proof-photos', true);
+-- Storage bucket for staff proof photos (public read — the gallery and verify pages
+-- render plain public URLs). Uploads/upserts are allowed for the staff app's anon key,
+-- scoped to this bucket only; same dev-grade posture as the rest of this schema.
+insert into storage.buckets (id, name, public)
+values ('proof-photos', 'proof-photos', true)
+on conflict (id) do nothing;
+
+create policy "anyone can upload proof photos" on storage.objects
+  for insert to anon, authenticated
+  with check (bucket_id = 'proof-photos');
+
+create policy "anyone can upsert proof photos" on storage.objects
+  for update to anon, authenticated
+  using (bucket_id = 'proof-photos')
+  with check (bucket_id = 'proof-photos');
+
+create policy "anyone can read proof photos" on storage.objects
+  for select to anon, authenticated
+  using (bucket_id = 'proof-photos');
 
 -- Staff sign-in: verifies the PIN server-side so the hash never reaches the client,
 -- rejects disabled/archived accounts, and stamps last_login_at on success.

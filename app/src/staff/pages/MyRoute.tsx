@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '../../components/ui/Button'
 import { ProgressRing } from '../../components/ui/ProgressRing'
 import { StatusPill } from '../../components/ui/StatusPill'
@@ -16,6 +16,7 @@ import {
 } from '../../lib/domain'
 import { repo } from '../../lib/repo'
 import type { Area, Assignment, Issue } from '../../lib/types'
+import { getOutbox, onOutboxChange } from '../outbox'
 import { PhoneScreen } from '../PhoneScreen'
 
 function greeting() {
@@ -81,11 +82,15 @@ export function MyRoute() {
   const { staff } = useStaffAuth()
   const navigate = useNavigate()
   const [assignments, setAssignments] = useState<Assignment[]>([])
+  const [openTasks, setOpenTasks] = useState<Assignment[]>([])
   const [areas, setAreas] = useState<Area[]>([])
   const [issues, setIssues] = useState<Issue[]>([])
   const [branchName, setBranchName] = useState('')
   const [loading, setLoading] = useState(true)
+  const [claimingId, setClaimingId] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const outbox = useSyncExternalStore(onOutboxChange, getOutbox)
+  const queuedIds = useMemo(() => new Set(outbox.map((i) => i.assignmentId)), [outbox])
 
   useEffect(() => {
     if (!staff) return
@@ -93,10 +98,12 @@ export function MyRoute() {
     function load() {
       Promise.all([
         repo.getMyAssignments(staff!.id),
+        repo.listOpenAssignments(staff!.branchId),
         repo.listAreasForSite(staff!.siteId),
         repo.listIssuesForSite(staff!.siteId),
-      ]).then(([a, ar, is]) => {
+      ]).then(([a, open, ar, is]) => {
         setAssignments(a)
+        setOpenTasks(open)
         setAreas(ar)
         setIssues(is)
         setLoading(false)
@@ -107,6 +114,23 @@ export function MyRoute() {
     unsub = repo.subscribe(staff.siteId, load)
     return () => unsub?.()
   }, [staff])
+
+  async function claimTask(a: Assignment) {
+    if (!staff || claimingId) return
+    setClaimingId(a.id)
+    try {
+      await repo.claimAssignment(a.id, staff.id)
+      // Whether we won the claim or someone beat us to it, refresh both lists.
+      const [mine, open] = await Promise.all([
+        repo.getMyAssignments(staff.id),
+        repo.listOpenAssignments(staff.branchId),
+      ])
+      setAssignments(mine)
+      setOpenTasks(open)
+    } finally {
+      setClaimingId(null)
+    }
+  }
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000)
@@ -141,12 +165,14 @@ export function MyRoute() {
             <div className="text-sm text-ink-soft">{greeting()}</div>
             <div className="mt-0.5 text-2xl font-extrabold tracking-tight">{staff.fullName}</div>
           </div>
-          <div
+          <Link
+            to="/staff/profile"
+            aria-label="Profile"
             className="flex h-11 w-11 items-center justify-center rounded-full text-[15px] font-bold text-white"
             style={{ background: staff.colorHex }}
           >
             {staff.initials}
-          </div>
+          </Link>
         </div>
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-ink-soft">
           <span className="h-1.5 w-1.5 rounded-full bg-verified" />
@@ -175,6 +201,23 @@ export function MyRoute() {
           </div>
         </div>
 
+        {outbox.length > 0 && (
+          <Link
+            to="/staff/pending"
+            className="mt-3 flex items-center gap-2.5 rounded-[14px] border border-attention/30 bg-attention/10 px-3.5 py-3"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B27A0F" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+              <path d="M21 12a9 9 0 11-2.6-6.3M21 4v5h-5" />
+            </svg>
+            <span className="flex-1 text-[13px] font-bold text-attention">
+              {outbox.length} update{outbox.length === 1 ? '' : 's'} waiting to sync
+            </span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B27A0F" strokeWidth="2.2" strokeLinecap="round">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </Link>
+        )}
+
         <div className="mb-3 mt-6 flex items-center justify-between px-1">
           <div className="text-base font-extrabold">My route</div>
           <div className="font-mono text-xs font-semibold text-muted">{remaining} LEFT</div>
@@ -184,6 +227,57 @@ export function MyRoute() {
           {pending.map((a) => {
             const status = effectiveStatus(a)
             const isNext = next?.id === a.id
+            if (queuedIds.has(a.id)) {
+              // Completed on this phone but not yet on the server — waiting in the outbox.
+              return (
+                <Link
+                  key={a.id}
+                  to="/staff/pending"
+                  className="flex items-center gap-3.5 rounded-[15px] border border-attention/30 bg-white p-3.5"
+                >
+                  <div className="flex h-9.5 w-9.5 items-center justify-center rounded-[10px] bg-attention/15 text-attention">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12a9 9 0 11-2.6-6.3M21 4v5h-5" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-[15px] font-bold">
+                      {a.areaName}
+                      <PriorityBadge priority={a.priority} />
+                    </div>
+                    <div className="font-mono text-xs text-muted">{a.areaCode} · done on this phone</div>
+                  </div>
+                  <StatusPill tone="attention">PENDING SYNC</StatusPill>
+                </Link>
+              )
+            }
+            if (status === 'in_progress') {
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => navigate(`/staff/checklist/${a.id}`)}
+                  className="flex items-center gap-3.5 rounded-[15px] border-2 border-verified bg-white p-3.5 text-left"
+                >
+                  <div className="flex h-9.5 w-9.5 items-center justify-center rounded-[10px] bg-verified-tint text-verified-ink">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#1A5539" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 8v4l2.5 2.5" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-[15px] font-bold">
+                      {a.areaName}
+                      {openIssueAssignmentIds.has(a.id) && <IssueFlag />}
+                      <PriorityBadge priority={a.priority} />
+                    </div>
+                    <div className="font-mono text-xs text-verified-ink">
+                      {a.areaCode} · started{a.startedAt ? ` ${formatClock(a.startedAt)}` : ''} · tap to continue
+                    </div>
+                  </div>
+                  <StatusPill tone="verified" dot>ONGOING</StatusPill>
+                </button>
+              )
+            }
             if (isNext) {
               return (
                 <button
@@ -272,6 +366,44 @@ export function MyRoute() {
             <div className="rounded-[15px] border border-dashed border-line bg-white/50 p-4 text-center text-[13px] font-semibold text-muted">
               All areas complete for this shift
             </div>
+          )}
+          {openTasks.length > 0 && (
+            <>
+              <div className="mt-2 flex items-center gap-2.5 px-1">
+                <span className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted">
+                  Available to pick up · {openTasks.length}
+                </span>
+                <span className="h-px flex-1 bg-line-soft" />
+              </div>
+              {openTasks.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex items-center gap-3.5 rounded-[15px] border border-dashed border-line bg-white p-3.5"
+                >
+                  <div className="flex h-9.5 w-9.5 items-center justify-center rounded-[10px] bg-line-soft font-mono text-[13px] font-semibold text-muted">
+                    {areaAbbrev(a.areaCode)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-[15px] font-bold">
+                      {a.areaName}
+                      <PriorityBadge priority={a.priority} />
+                    </div>
+                    <div className="font-mono text-xs text-muted">
+                      {a.areaCode} · unassigned
+                      <FrequencyNote area={areasById.get(a.areaId)} now={now} />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={claimingId !== null}
+                    onClick={() => void claimTask(a)}
+                    className="flex-shrink-0 rounded-full bg-ink px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-50"
+                  >
+                    {claimingId === a.id ? 'PICKING…' : 'PICK UP'}
+                  </button>
+                </div>
+              ))}
+            </>
           )}
           {completed.length > 0 && (
             <>

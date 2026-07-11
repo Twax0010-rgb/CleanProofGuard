@@ -540,6 +540,23 @@ export const mockRepo: DataRepo = {
     return delay(updated)
   },
 
+  async listOpenAssignments(branchId) {
+    return delay(
+      state.assignments
+        .filter((a) => a.branchId === branchId && !a.staffId && a.status !== 'done')
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+    )
+  },
+
+  async claimAssignment(assignmentId, staffId) {
+    // Staff self-claim, not an admin action — no role gate, but strictly claim-once.
+    const current = state.assignments.find((a) => a.id === assignmentId)
+    if (!current || current.staffId || current.status === 'done') return delay(null)
+    const updated = updateAssignment(assignmentId, (a) => ({ ...a, staffId }))
+    persist()
+    return delay(updated)
+  },
+
   async publishRoutes(siteId) {
     requireRole(canManageRoutes, 'publish routes')
     logAction(siteId, 'routes_published', state.site.name)

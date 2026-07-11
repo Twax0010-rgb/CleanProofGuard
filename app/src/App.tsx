@@ -18,14 +18,20 @@ import { MyRoute } from './staff/pages/MyRoute'
 import { ScanTag } from './staff/pages/ScanTag'
 import { Checklist } from './staff/pages/Checklist'
 import { ProofLogged } from './staff/pages/ProofLogged'
+import { PendingSync } from './staff/pages/PendingSync'
+import { Profile } from './staff/pages/Profile'
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Landing />} />
+      {/* The main domain is the admin website; the staff phone app lives under /staff only. */}
+      <Route path="/" element={<Navigate to="/admin" replace />} />
+      <Route path="/welcome" element={<Landing />} />
       <Route path="/verify/:areaCode" element={<VerifyArea />} />
 
       <Route path="/staff/auth" element={<StaffSignIn />} />
+      <Route path="/staff/login" element={<Navigate to="/staff/auth" replace />} />
+      <Route path="/staff/app" element={<Navigate to="/staff" replace />} />
       <Route
         path="/staff"
         element={
@@ -58,9 +64,27 @@ export default function App() {
           </RequireStaff>
         }
       />
+      <Route
+        path="/staff/pending"
+        element={
+          <RequireStaff>
+            <PendingSync />
+          </RequireStaff>
+        }
+      />
+      <Route
+        path="/staff/profile"
+        element={
+          <RequireStaff>
+            <Profile />
+          </RequireStaff>
+        }
+      />
 
       <Route path="/admin/auth" element={<AdminSignIn />} />
+      <Route path="/admin/login" element={<Navigate to="/admin/auth" replace />} />
       <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
+      <Route path="/admin/dashboard" element={<Navigate to="/admin/overview" replace />} />
       <Route
         path="/admin/overview"
         element={

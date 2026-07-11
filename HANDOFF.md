@@ -1,6 +1,29 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-11, for the next session)
+## ⏸ Where we left off (2026-07-11 later session, for the next session)
+**No task in progress.** Newest work — the system is now split into two clear entry points:
+- **Admin website is the default**: `/` → `/admin` (login/dashboard). The old landing page moved to
+  `/welcome`. Alias routes: `/admin/login`, `/admin/dashboard`, `/staff/login`, `/staff/app`. The
+  admin sidebar has an "Open Staff App" preview link (new tab).
+- **Staff app is an installable PWA** under `/staff`: `public/manifest.webmanifest` (CPG Staff,
+  #0B7D54, standalone, scope `/staff`), generated icons in `public/icons/`, iOS/Android meta tags in
+  `index.html`, an Install button on staff sign-in + profile (`src/staff/components/InstallStaffApp.tsx`,
+  beforeinstallprompt on Android, Add-to-Home-Screen instructions on iOS, hidden when standalone), and
+  an app-shell service worker `public/sw.js` (registered in prod builds only; never caches /admin or
+  Supabase data).
+- **New staff screens**: ONGOING cards (in-progress, tap to continue), "Available to pick up"
+  (unassigned branch work, claim-once via new `repo.claimAssignment`/`listOpenAssignments`),
+  `/staff/profile` (info + install + sign out), `/staff/pending` (offline outbox).
+- **Offline outbox** (`src/staff/outbox.ts`): checklist works optimistically offline; failed
+  submissions queue locally as "Pending sync", auto-sync on reconnect, deduped by re-checking the
+  assignment server-side before replay.
+- **Supabase storage bucket `proof-photos` created** (migration `proof_photos_bucket`) — photo
+  uploads were failing with "Bucket not found" before this; schema.sql updated to match.
+- All acceptance-testable flows verified in the browser against Supabase (routing, PWA assets,
+  pick-up, complete-with-photos, outbox sync + dedupe, admin live feed/photo gallery reflecting
+  staff work, thabo scoped to SWH only, /admin/users blocked for non-superusers).
+
+## Previous session (2026-07-11)
 **No task in progress — everything below is done and verified.** Latest work: the project is now on
 GitHub (https://github.com/Twax0010-rgb/CleanProofGuard) and **runs against a real Supabase backend**
 (project `ezqxsdejcdxngunfebds`, eu-central-1). Three migrations applied: `initial_schema`,

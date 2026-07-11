@@ -227,6 +227,22 @@ export function AdminLayout({ children }: { children: ReactNode }) {
         </div>
 
         <div className="flex-1" />
+        {/* Preview link only — the admin system never starts in the staff app. */}
+        <a
+          href="/staff"
+          target="_blank"
+          rel="noopener"
+          className="mb-1.5 flex items-center gap-2.75 rounded-[11px] border border-dashed border-line px-3 py-2.5 text-sm font-bold text-ink-soft hover:bg-line-softer"
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="7" y="2" width="10" height="20" rx="2.5" />
+            <path d="M11 18.5h2" />
+          </svg>
+          Open Staff App
+          <svg className="ml-auto" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 17L17 7M9 7h8v8" />
+          </svg>
+        </a>
         {admin && (
           <button
             onClick={() => {

@@ -233,6 +233,11 @@ export interface DataRepo {
   /** Marks the current cleaning cycle done; if the area has a recurring frequency, generates the next cycle's assignment. */
   submitProof(assignmentId: string): Promise<Assignment>
 
+  /** Open (not-done), unassigned work at a branch — the staff app's "available to pick up" list. */
+  listOpenAssignments(branchId: string): Promise<Assignment[]>
+  /** Staff claims an unassigned task for themselves. Claim-once: resolves null if someone else got it first. */
+  claimAssignment(assignmentId: string, staffId: string): Promise<Assignment | null>
+
   /** All of today's assignments for a site, assigned and unassigned. */
   getSiteAssignments(siteId: string): Promise<Assignment[]>
   assignStaffToArea(assignmentId: string, staffId: string | null): Promise<Assignment>

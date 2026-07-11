@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '../../components/ui/Button'
 import { PinDots } from '../../components/ui/PinDots'
 import { useStaffAuth } from '../../contexts/StaffAuthContext'
+import { InstallStaffApp } from '../components/InstallStaffApp'
 import { PhoneScreen } from '../PhoneScreen'
 
 export function StaffSignIn() {
@@ -110,6 +111,7 @@ export function StaffSignIn() {
               Badge scanning isn't set up yet — sign in with your Staff ID and PIN.
             </p>
           )}
+          <InstallStaffApp dark />
           <p className="mt-1 text-center font-mono text-[11px] text-white/45">
             Demo: MB-4471 · PIN 1234
           </p>

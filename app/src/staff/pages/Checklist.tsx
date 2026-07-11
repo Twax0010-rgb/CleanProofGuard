@@ -5,6 +5,7 @@ import { useStaffAuth } from '../../contexts/StaffAuthContext'
 import { taskProgress } from '../../lib/domain'
 import { repo } from '../../lib/repo'
 import type { Assignment, IssueSeverity } from '../../lib/types'
+import { enqueueSubmission, getOutbox, isNetworkError, syncOutbox } from '../outbox'
 import { PhoneScreen } from '../PhoneScreen'
 
 export function Checklist() {
@@ -15,6 +16,10 @@ export function Checklist() {
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [reportingIssue, setReportingIssue] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  // True once any tick/photo failed to reach the backend (offline) — the screen keeps
+  // working on local state and the final submit goes through the outbox replay instead.
+  const [offlineDirty, setOfflineDirty] = useState(false)
   const beforeInputRef = useRef<HTMLInputElement>(null)
   const afterInputRef = useRef<HTMLInputElement>(null)
 
@@ -31,8 +36,21 @@ export function Checklist() {
   }
 
   async function toggleTask(taskId: string) {
-    await repo.toggleTask(assignmentId, taskId)
-    refresh()
+    // Optimistic: tick locally first so the checklist keeps working with no signal.
+    setAssignment(
+      (a) =>
+        a && {
+          ...a,
+          tasks: a.tasks.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t)),
+        },
+    )
+    try {
+      await repo.toggleTask(assignmentId, taskId)
+      refresh()
+    } catch (err) {
+      if (!isNetworkError(err)) throw err
+      setOfflineDirty(true)
+    }
   }
 
   async function handlePhoto(label: 'before' | 'after', file: File | undefined) {
@@ -43,15 +61,60 @@ export function Checklist() {
       reader.onerror = reject
       reader.readAsDataURL(file)
     })
-    await repo.addPhoto(assignmentId, label, dataUrl)
-    refresh()
+    setAssignment(
+      (a) =>
+        a && {
+          ...a,
+          photos: [...a.photos.filter((p) => p.label !== label), { id: `local-${label}`, label, dataUrl }],
+        },
+    )
+    try {
+      await repo.addPhoto(assignmentId, label, dataUrl)
+      refresh()
+    } catch (err) {
+      if (!isNetworkError(err)) throw err
+      setOfflineDirty(true)
+    }
   }
 
   async function handleSubmit() {
+    if (!assignment) return
     setSubmitting(true)
-    if (note.trim()) await repo.setNote(assignmentId, note.trim())
-    await repo.submitProof(assignmentId)
-    navigate(`/staff/proof/${assignmentId}`, { replace: true })
+    setSubmitError(null)
+
+    // Offline path: queue the full local state and replay it via the outbox — never
+    // call submitProof directly when the backend is missing ticks/photos, or the
+    // stored proof record would be incomplete.
+    const queueAndGo = async () => {
+      enqueueSubmission({
+        assignmentId,
+        areaName: assignment.areaName,
+        areaCode: assignment.areaCode,
+        completedTaskIds: assignment.tasks.filter((t) => t.completed).map((t) => t.id),
+        photos: assignment.photos.map((p) => ({ label: p.label, dataUrl: p.dataUrl })),
+        note: note.trim(),
+      })
+      if (navigator.onLine) await syncOutbox() // connection may be back — push it through now
+      const stillQueued = getOutbox().some((i) => i.assignmentId === assignmentId)
+      navigate(stillQueued ? '/staff/pending' : `/staff/proof/${assignmentId}`, { replace: true })
+    }
+
+    try {
+      if (offlineDirty) {
+        await queueAndGo()
+        return
+      }
+      if (note.trim()) await repo.setNote(assignmentId, note.trim())
+      await repo.submitProof(assignmentId)
+      navigate(`/staff/proof/${assignmentId}`, { replace: true })
+    } catch (err) {
+      if (isNetworkError(err)) {
+        await queueAndGo()
+      } else {
+        setSubmitError(err instanceof Error ? err.message : 'Could not submit — try again.')
+        setSubmitting(false)
+      }
+    }
   }
 
   if (!assignment) {
@@ -170,7 +233,7 @@ export function Checklist() {
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          onBlur={() => repo.setNote(assignmentId, note.trim())}
+          onBlur={() => repo.setNote(assignmentId, note.trim()).catch(() => setOfflineDirty(true))}
           placeholder="Add any notes about this area…"
           rows={2}
           className="w-full resize-none rounded-[14px] border border-line bg-white p-3.5 text-sm text-ink outline-none placeholder:text-[#B4BDC2] focus:border-stroke-soft"
@@ -205,6 +268,16 @@ export function Checklist() {
         className="pointer-events-none fixed bottom-0 left-1/2 w-full max-w-[480px] -translate-x-1/2 px-[22px] pb-7 pt-3.5"
         style={{ background: 'linear-gradient(to top, var(--color-app) 62%, transparent)' }}
       >
+        {offlineDirty && (
+          <div className="pointer-events-auto mb-2 rounded-lg bg-attention/15 px-3 py-2 text-center text-[12px] font-bold text-attention">
+            You're offline — this will be saved as Pending sync
+          </div>
+        )}
+        {submitError && (
+          <div className="pointer-events-auto mb-2 rounded-lg bg-overdue-tint px-3 py-2 text-center text-[12px] font-medium text-overdue">
+            {submitError}
+          </div>
+        )}
         <Button
           fullWidth
           className="pointer-events-auto"
