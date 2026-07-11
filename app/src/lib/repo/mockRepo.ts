@@ -422,19 +422,30 @@ export const mockRepo: DataRepo = {
       )
       if (emailClash) throw new Error(`Email "${patch.email}" is already in use.`)
     }
+    if (patch.staffCode) {
+      const codeClash = state.staff.some(
+        (s) => s.id !== staffId && s.staffCode.toLowerCase() === patch.staffCode!.toLowerCase(),
+      )
+      if (codeClash) throw new Error(`Staff ID "${patch.staffCode}" is already in use.`)
+    }
     const before = state.staff.find((s) => s.id === staffId)
     const updated = updateStaffRecord(staffId, (s) => ({ ...s, ...patch }))
-    // Disabling/archiving someone shouldn't strand their unfinished work on a
-    // hidden column — send it back to Unassigned. Completed work keeps its
+    // Disabling/archiving/deleting someone shouldn't strand their unfinished work
+    // on a hidden column — send it back to Unassigned. Completed work keeps its
     // staffId so their name still shows correctly in reports/history.
-    if (patch.accountStatus === 'disabled' || patch.accountStatus === 'archived') {
+    if (patch.accountStatus && patch.accountStatus !== 'active') {
       state.assignments = state.assignments.map((a) =>
         a.staffId === staffId && a.status !== 'done' ? { ...a, staffId: null } : a,
       )
     }
-    if (patch.accountStatus === 'archived' && before?.accountStatus !== 'archived') {
+    if (patch.accountStatus === 'deleted' && before?.accountStatus !== 'deleted') {
+      logAction(updated.siteId, 'user_deleted', updated.fullName)
+    } else if (patch.accountStatus === 'archived' && before?.accountStatus !== 'archived') {
       logAction(updated.siteId, 'user_archived', updated.fullName)
-    } else if (patch.accountStatus === 'active' && before?.accountStatus === 'archived') {
+    } else if (
+      patch.accountStatus === 'active' &&
+      (before?.accountStatus === 'archived' || before?.accountStatus === 'deleted')
+    ) {
       logAction(updated.siteId, 'user_restored', updated.fullName)
     } else {
       logAction(updated.siteId, 'user_updated', updated.fullName)

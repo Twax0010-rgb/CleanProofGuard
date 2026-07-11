@@ -115,7 +115,10 @@ export function Photos() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, activeBranchId, staffId, taskType, search, range])
 
-  const staffOptions = useMemo(() => staff.filter((s) => s.accountStatus !== 'archived'), [staff])
+  const staffOptions = useMemo(
+    () => staff.filter((s) => s.accountStatus !== 'archived' && s.accountStatus !== 'deleted'),
+    [staff],
+  )
 
   // Pair before/after into sets, then split into "needs review" (always on top, newest first)
   // and "reviewed" (below) so the queue never buries what still needs a decision.

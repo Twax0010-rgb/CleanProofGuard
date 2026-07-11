@@ -396,9 +396,11 @@ export const supabaseRepo: DataRepo = {
     if (patch.email !== undefined) payload.email = patch.email
     if (patch.phone !== undefined) payload.phone = patch.phone
     if (patch.accountStatus !== undefined) payload.account_status = patch.accountStatus
+    if (patch.staffCode !== undefined) payload.staff_code = patch.staffCode
     const { error } = await client().from('staff').update(payload).eq('id', staffId)
     if (error) {
       if (error.message.includes('staff_email_unique')) throw new Error(`Email "${patch.email}" is already in use.`)
+      if (error.message.includes('staff_code')) throw new Error(`Staff ID "${patch.staffCode}" is already in use.`)
       throw error
     }
     const { data, error: fetchError } = await client()
@@ -408,10 +410,10 @@ export const supabaseRepo: DataRepo = {
       .single()
     if (fetchError) throw fetchError
 
-    // Disabling/archiving someone shouldn't strand their unfinished work on a
-    // hidden column — send it back to Unassigned. Completed work keeps its
+    // Disabling/archiving/deleting someone shouldn't strand their unfinished work
+    // on a hidden column — send it back to Unassigned. Completed work keeps its
     // staff_id so their name still shows correctly in reports/history.
-    if (patch.accountStatus === 'disabled' || patch.accountStatus === 'archived') {
+    if (patch.accountStatus && patch.accountStatus !== 'active') {
       const { error: unassignError } = await client()
         .from('assignments')
         .update({ staff_id: null })
@@ -421,9 +423,14 @@ export const supabaseRepo: DataRepo = {
     }
 
     const staff = mapStaff(data)
-    if (patch.accountStatus === 'archived' && beforeStatus !== 'archived') {
+    if (patch.accountStatus === 'deleted' && beforeStatus !== 'deleted') {
+      await logAudit(staff.siteId, 'user_deleted', staff.fullName)
+    } else if (patch.accountStatus === 'archived' && beforeStatus !== 'archived') {
       await logAudit(staff.siteId, 'user_archived', staff.fullName)
-    } else if (patch.accountStatus === 'active' && beforeStatus === 'archived') {
+    } else if (
+      patch.accountStatus === 'active' &&
+      (beforeStatus === 'archived' || beforeStatus === 'deleted')
+    ) {
       await logAudit(staff.siteId, 'user_restored', staff.fullName)
     } else {
       await logAudit(staff.siteId, 'user_updated', staff.fullName)

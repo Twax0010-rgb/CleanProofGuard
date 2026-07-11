@@ -1,7 +1,8 @@
 export type StaffStatus = 'on_shift' | 'on_break' | 'off_shift'
 
-/** Account lifecycle — separate from shift status. Disabled/archived accounts can't sign in. */
-export type AccountStatus = 'active' | 'disabled' | 'archived'
+/** Account lifecycle — separate from shift status. Only active accounts can sign in.
+ * Deleted is a soft delete: hidden from the main list and all pickers, restorable. */
+export type AccountStatus = 'active' | 'disabled' | 'archived' | 'deleted'
 
 export interface Site {
   id: string
@@ -224,6 +225,7 @@ export type AuditAction =
   | 'user_updated'
   | 'user_archived'
   | 'user_restored'
+  | 'user_deleted'
   | 'pin_reset'
   | 'area_created'
   | 'area_updated'

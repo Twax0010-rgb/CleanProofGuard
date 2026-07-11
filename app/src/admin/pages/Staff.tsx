@@ -14,7 +14,7 @@ const SHIFT_STATUS_LABEL: Record<StaffStatus, string> = {
   off_shift: 'Off shift',
 }
 
-const ACCOUNT_FILTERS: Array<AccountStatus | 'all'> = ['all', 'active', 'disabled', 'archived']
+const ACCOUNT_FILTERS: Array<AccountStatus | 'all'> = ['all', 'active', 'disabled', 'archived', 'deleted']
 
 export function Staff() {
   const { admin } = useAdminAuth()
@@ -26,7 +26,7 @@ export function Staff() {
   const [filter, setFilter] = useState<AccountStatus | 'all'>('all')
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<StaffMember | null>(null)
-  const [confirmArchive, setConfirmArchive] = useState<StaffMember | null>(null)
+  const [confirming, setConfirming] = useState<{ member: StaffMember; next: AccountStatus } | null>(null)
 
   useEffect(() => {
     if (!admin) return
@@ -48,7 +48,8 @@ export function Staff() {
     const q = query.trim().toLowerCase()
     return staff
       .filter((s) => inActiveBranch(s.branchId, activeBranchId))
-      .filter((s) => filter === 'all' || s.accountStatus === filter)
+      // Deleted users never show under "All" — they live in their own section.
+      .filter((s) => (filter === 'all' ? s.accountStatus !== 'deleted' : s.accountStatus === filter))
       .filter(
         (s) =>
           !q ||
@@ -67,11 +68,10 @@ export function Staff() {
     setStaff((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
   }
 
-  async function handleArchiveToggle(member: StaffMember) {
-    const next: AccountStatus = member.accountStatus === 'archived' ? 'active' : 'archived'
+  async function handleStatusChange(member: StaffMember, next: AccountStatus) {
     const updated = await repo.updateStaff(member.id, { accountStatus: next })
     setStaff((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
-    setConfirmArchive(null)
+    setConfirming(null)
   }
 
   if (!admin || loading) {
@@ -142,11 +142,12 @@ export function Staff() {
             const mine = assignments.filter((a) => a.staffId === s.id)
             const done = mine.filter((a) => a.status === 'done').length
             const archived = s.accountStatus === 'archived'
+            const deleted = s.accountStatus === 'deleted'
             return (
               <div
                 key={s.id}
                 className={`flex items-center gap-4 rounded-2xl border p-4 ${
-                  archived ? 'border-line bg-app opacity-70' : 'border-line bg-white'
+                  archived || deleted ? 'border-line bg-app opacity-70' : 'border-line bg-white'
                 }`}
               >
                 <Avatar initials={s.initials} colorHex={s.colorHex} size={44} />
@@ -197,7 +198,7 @@ export function Staff() {
                     </option>
                   ))}
                 </select>
-                {canEditUsers && (
+                {canEditUsers && !deleted && (
                   <button
                     onClick={() => setEditing(s)}
                     className="h-9 rounded-lg border border-line px-3 text-xs font-bold text-ink-soft"
@@ -206,29 +207,53 @@ export function Staff() {
                   </button>
                 )}
                 {canEditUsers &&
-                  (confirmArchive?.id === s.id ? (
+                  (confirming?.member.id === s.id ? (
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-ink-soft">Sure?</span>
+                      <span className="text-xs text-ink-soft">
+                        {confirming.next === 'deleted' ? 'Delete?' : confirming.next === 'archived' ? 'Archive?' : 'Restore?'}
+                      </span>
                       <button
-                        onClick={() => handleArchiveToggle(s)}
-                        className="h-9 rounded-lg bg-overdue px-2.5 text-xs font-bold text-white"
+                        onClick={() => handleStatusChange(confirming.member, confirming.next)}
+                        className={`h-9 rounded-lg px-2.5 text-xs font-bold text-white ${
+                          confirming.next === 'active' ? 'bg-verified' : 'bg-overdue'
+                        }`}
                       >
                         Yes
                       </button>
                       <button
-                        onClick={() => setConfirmArchive(null)}
+                        onClick={() => setConfirming(null)}
                         className="h-9 rounded-lg border border-line px-2.5 text-xs font-bold text-ink-soft"
                       >
                         No
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => setConfirmArchive(s)}
-                      className="h-9 rounded-lg border border-line px-3 text-xs font-bold text-overdue"
-                    >
-                      {archived ? 'Restore' : 'Archive'}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {(archived || deleted) && (
+                        <button
+                          onClick={() => setConfirming({ member: s, next: 'active' })}
+                          className="h-9 rounded-lg border border-line px-3 text-xs font-bold text-verified-ink"
+                        >
+                          Restore
+                        </button>
+                      )}
+                      {!archived && !deleted && (
+                        <button
+                          onClick={() => setConfirming({ member: s, next: 'archived' })}
+                          className="h-9 rounded-lg border border-line px-3 text-xs font-bold text-ink-soft"
+                        >
+                          Archive
+                        </button>
+                      )}
+                      {!deleted && (
+                        <button
+                          onClick={() => setConfirming({ member: s, next: 'deleted' })}
+                          className="h-9 rounded-lg border border-line px-3 text-xs font-bold text-overdue"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   ))}
               </div>
             )
@@ -271,7 +296,9 @@ function AccountBadge({ status }: { status: AccountStatus }) {
       ? 'bg-verified-tint text-verified-ink'
       : status === 'disabled'
         ? 'bg-attention/15 text-attention'
-        : 'bg-line-soft text-ink-soft'
+        : status === 'deleted'
+          ? 'bg-overdue/10 text-overdue'
+          : 'bg-line-soft text-ink-soft'
   return <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${cls}`}>{ACCOUNT_STATUS_LABELS[status]}</span>
 }
 
@@ -290,6 +317,7 @@ function AddUserModal({
   onCreated: (staff: StaffMember) => void
 }) {
   const [fullName, setFullName] = useState('')
+  const [staffCode, setStaffCode] = useState('')
   const [role, setRole] = useState('Cleaner')
   const [branchId, setBranchId] = useState(defaultBranchId)
   const [email, setEmail] = useState('')
@@ -309,6 +337,7 @@ function AddUserModal({
     try {
       const created = await repo.createStaff(siteId, {
         fullName: fullName.trim(),
+        staffCode: staffCode.trim() || undefined,
         role,
         branchId,
         email: email.trim() || null,
@@ -328,6 +357,14 @@ function AddUserModal({
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <Field label="Full name">
           <input required value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputCls} placeholder="Jordan Ellis" />
+        </Field>
+        <Field label="Staff ID (optional)">
+          <input
+            value={staffCode}
+            onChange={(e) => setStaffCode(e.target.value.toUpperCase())}
+            className={`${inputCls} font-mono`}
+            placeholder="Leave blank to auto-generate"
+          />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Role">
@@ -387,6 +424,7 @@ function EditUserModal({
   onSaved: (staff: StaffMember) => void
 }) {
   const [fullName, setFullName] = useState(staff.fullName)
+  const [staffCode, setStaffCode] = useState(staff.staffCode)
   const [role, setRole] = useState(staff.role)
   const [email, setEmail] = useState(staff.email ?? '')
   const [phone, setPhone] = useState(staff.phone ?? '')
@@ -394,9 +432,13 @@ function EditUserModal({
     staff.accountStatus === 'disabled' ? 'disabled' : 'active',
   )
   const [newPin, setNewPin] = useState('')
-  const [pinSaved, setPinSaved] = useState(false)
+  const [pinBusy, setPinBusy] = useState(false)
+  const [pinResetTo, setPinResetTo] = useState<string | null>(null)
+  const [pinError, setPinError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  const lockedStatus = staff.accountStatus === 'archived' || staff.accountStatus === 'deleted'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -405,11 +447,12 @@ function EditUserModal({
     try {
       const updated = await repo.updateStaff(staff.id, {
         fullName: fullName.trim(),
+        staffCode: staffCode.trim(),
         role,
         email: email.trim() || null,
         phone: phone.trim() || null,
-        // Archived accounts are only ever restored via the explicit Restore action below.
-        ...(staff.accountStatus === 'archived' ? {} : { accountStatus }),
+        // Archived/deleted accounts are only ever restored via the explicit Restore action.
+        ...(lockedStatus ? {} : { accountStatus }),
       })
       onSaved(updated)
     } catch (err) {
@@ -420,10 +463,19 @@ function EditUserModal({
   }
 
   async function handleResetPin() {
-    if (newPin.length < 4) return
-    await repo.resetStaffPin(staff.id, newPin)
-    setPinSaved(true)
-    setNewPin('')
+    if (newPin.length < 4 || pinBusy) return
+    setPinError(null)
+    setPinResetTo(null)
+    setPinBusy(true)
+    try {
+      await repo.resetStaffPin(staff.id, newPin)
+      setPinResetTo(newPin)
+      setNewPin('')
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : 'Could not reset the PIN — try again.')
+    } finally {
+      setPinBusy(false)
+    }
   }
 
   return (
@@ -433,24 +485,20 @@ function EditUserModal({
           <input required value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputCls} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
+          <Field label="Staff ID">
+            <input
+              required
+              value={staffCode}
+              onChange={(e) => setStaffCode(e.target.value.toUpperCase())}
+              className={`${inputCls} font-mono`}
+            />
+          </Field>
           <Field label="Role">
             <select value={role} onChange={(e) => setRole(e.target.value)} className={inputCls}>
               <option>Cleaner</option>
               <option>Supervisor</option>
             </select>
           </Field>
-          {staff.accountStatus !== 'archived' && (
-            <Field label="Account">
-              <select
-                value={accountStatus}
-                onChange={(e) => setAccountStatus(e.target.value as 'active' | 'disabled')}
-                className={inputCls}
-              >
-                <option value="active">Active</option>
-                <option value="disabled">Disabled</option>
-              </select>
-            </Field>
-          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Email">
@@ -460,9 +508,21 @@ function EditUserModal({
             <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inputCls} />
           </Field>
         </div>
+        {!lockedStatus && (
+          <Field label="Account">
+            <select
+              value={accountStatus}
+              onChange={(e) => setAccountStatus(e.target.value as 'active' | 'disabled')}
+              className={inputCls}
+            >
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </Field>
+        )}
         {error && <div className="text-[13px] font-medium text-overdue">{error}</div>}
         <div className="mt-1 flex gap-2">
-          <button type="submit" disabled={submitting || !fullName.trim()} className="flex h-11 flex-1 items-center justify-center rounded-xl bg-verified text-sm font-bold text-white disabled:opacity-50">
+          <button type="submit" disabled={submitting || !fullName.trim() || !staffCode.trim()} className="flex h-11 flex-1 items-center justify-center rounded-xl bg-verified text-sm font-bold text-white disabled:opacity-50">
             {submitting ? 'Saving…' : 'Save changes'}
           </button>
           <button type="button" onClick={onClose} className="h-11 flex-1 rounded-xl border border-stroke text-sm font-bold text-ink">
@@ -478,21 +538,28 @@ function EditUserModal({
             value={newPin}
             onChange={(e) => {
               setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-              setPinSaved(false)
+              setPinResetTo(null)
+              setPinError(null)
             }}
-            placeholder="New PIN"
+            placeholder="New PIN (4-6 digits)"
             className={`${inputCls} font-mono`}
           />
           <button
             type="button"
             onClick={handleResetPin}
-            disabled={newPin.length < 4}
+            disabled={newPin.length < 4 || pinBusy}
             className="rounded-xl border border-line px-3 text-xs font-bold text-ink-soft disabled:opacity-40"
           >
-            Reset
+            {pinBusy ? 'Resetting…' : 'Reset'}
           </button>
         </div>
-        {pinSaved && <p className="mt-1.5 text-[12px] font-semibold text-verified-ink">PIN updated.</p>}
+        {pinResetTo && (
+          <p className="mt-1.5 text-[12px] font-semibold text-verified-ink">
+            ✓ PIN reset to <span className="font-mono">{pinResetTo}</span>. It works immediately — share it with{' '}
+            {fullName.split(' ')[0] || 'them'}.
+          </p>
+        )}
+        {pinError && <p className="mt-1.5 text-[12px] font-medium text-overdue">{pinError}</p>}
       </div>
     </ModalShell>
   )

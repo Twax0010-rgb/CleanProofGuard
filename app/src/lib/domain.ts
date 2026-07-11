@@ -31,6 +31,7 @@ export const ACCOUNT_STATUS_LABELS: Record<AccountStatus, string> = {
   active: 'Active',
   disabled: 'Disabled',
   archived: 'Archived',
+  deleted: 'Deleted',
 }
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
@@ -38,6 +39,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   user_updated: 'Edited user',
   user_archived: 'Archived user',
   user_restored: 'Restored user',
+  user_deleted: 'Deleted user',
   pin_reset: 'Reset PIN',
   area_created: 'Created area',
   area_updated: 'Edited area',
@@ -320,7 +322,7 @@ export function activeStaff(staff: Staff[]): Staff[] {
 export function computeSiteKpis(assignments: Assignment[], staff: Staff[], issues: Issue[] = []): SiteKpis {
   const { done, total } = assignmentProgress(assignments)
   const overdueCount = assignments.filter((a) => effectiveStatus(a) === 'overdue').length
-  const roster = staff.filter((s) => s.accountStatus !== 'archived')
+  const roster = staff.filter((s) => s.accountStatus !== 'archived' && s.accountStatus !== 'deleted')
   const staffOnShift = activeStaff(staff).filter((s) => s.status !== 'off_shift').length
   return {
     cleaned: done,

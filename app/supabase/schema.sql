@@ -58,7 +58,7 @@ create table if not exists staff (
   status text not null default 'off_shift' check (status in ('on_shift', 'on_break', 'off_shift')),
   -- Account lifecycle, separate from shift status above. Disabled/archived staff
   -- fail authenticate_staff() and are filtered out of active-assignment screens.
-  account_status text not null default 'active' check (account_status in ('active', 'disabled', 'archived')),
+  account_status text not null default 'active' check (account_status in ('active', 'disabled', 'archived', 'deleted')),
   email text,
   phone text,
   shift_start timestamptz,
@@ -344,7 +344,7 @@ security definer
 set search_path = public, extensions
 as $$
 begin
-  if current_admin_role(p_site_id) not in ('superuser', 'super_admin', 'manager') then
+  if coalesce(current_admin_role(p_site_id), '') not in ('superuser', 'super_admin', 'manager') then
     raise exception 'Not authorized to add a user';
   end if;
 
@@ -368,7 +368,7 @@ declare
   v_site_id uuid;
 begin
   select site_id into v_site_id from staff where id = p_staff_id;
-  if v_site_id is null or current_admin_role(v_site_id) not in ('super_admin', 'manager') then
+  if v_site_id is null or coalesce(current_admin_role(v_site_id), '') not in ('superuser', 'super_admin', 'manager') then
     raise exception 'Not authorized to reset a PIN';
   end if;
 
@@ -449,7 +449,7 @@ declare
   v_site_id uuid;
 begin
   select site_id into v_site_id from areas where id = p_area_id;
-  if v_site_id is null or current_admin_role(v_site_id) not in ('super_admin', 'manager') then
+  if v_site_id is null or coalesce(current_admin_role(v_site_id), '') not in ('superuser', 'super_admin', 'manager') then
     raise exception 'Not authorized to change cleaning frequency';
   end if;
 
@@ -482,7 +482,7 @@ declare
   v_label text;
   v_i int := 0;
 begin
-  if current_admin_role(p_site_id) not in ('superuser', 'super_admin', 'manager') then
+  if coalesce(current_admin_role(p_site_id), '') not in ('superuser', 'super_admin', 'manager') then
     raise exception 'Not authorized to add an area';
   end if;
 
@@ -560,7 +560,7 @@ declare
     left(regexp_replace(p_name, '[^A-Za-z]', '', 'g'), 3)));
 begin
   -- Managing branches is superuser-only, unless a per-user override grants branches.manage.
-  if current_admin_role(p_site_id) <> 'superuser'
+  if coalesce(current_admin_role(p_site_id), '') <> 'superuser'
      and coalesce((select (permissions->'branches'->>'manage')::boolean from admin_profiles where id = auth.uid()), false) is not true then
     raise exception 'Not authorized to add a branch';
   end if;
@@ -586,7 +586,7 @@ declare
   v_site_id uuid;
 begin
   select site_id into v_site_id from branches where id = p_branch_id;
-  if v_site_id is null or (current_admin_role(v_site_id) <> 'superuser'
+  if v_site_id is null or (coalesce(current_admin_role(v_site_id), '') <> 'superuser'
      and coalesce((select (permissions->'branches'->>'manage')::boolean from admin_profiles where id = auth.uid()), false) is not true) then
     raise exception 'Not authorized to change a branch status';
   end if;
@@ -624,7 +624,7 @@ declare
   v_i int := 0;
 begin
   select * into v_before from areas where id = p_area_id;
-  if v_before.id is null or current_admin_role(v_before.site_id) not in ('super_admin', 'manager') then
+  if v_before.id is null or coalesce(current_admin_role(v_before.site_id), '') not in ('superuser', 'super_admin', 'manager') then
     raise exception 'Not authorized to edit an area';
   end if;
 
@@ -681,7 +681,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if current_admin_role(p_site_id) is distinct from 'super_admin' then
+  if coalesce(current_admin_role(p_site_id), '') not in ('superuser', 'super_admin') then
     raise exception 'Not authorized to manage task templates';
   end if;
 
@@ -711,7 +711,7 @@ declare
   v_site_id uuid;
 begin
   select site_id into v_site_id from task_templates where id = p_template_id;
-  if v_site_id is null or current_admin_role(v_site_id) is distinct from 'super_admin' then
+  if v_site_id is null or coalesce(current_admin_role(v_site_id), '') not in ('superuser', 'super_admin') then
     raise exception 'Not authorized to manage task templates';
   end if;
 
@@ -972,7 +972,7 @@ create policy "managers can update staff at their site" on staff for update
   to authenticated
   using (
     site_id in (select site_id from admin_profiles where id = auth.uid())
-    and current_admin_role(site_id) in ('super_admin', 'manager')
+    and current_admin_role(site_id) in ('superuser', 'super_admin', 'manager')
   );
 
 create policy "anyone can read today's assignments" on assignments for select using (true);
@@ -1033,7 +1033,7 @@ create policy "admins can insert import batches at their site" on location_impor
   to authenticated
   with check (
     site_id in (select site_id from admin_profiles where id = auth.uid())
-    and current_admin_role(site_id) in ('super_admin', 'manager')
+    and current_admin_role(site_id) in ('superuser', 'super_admin', 'manager')
   );
 
 -- Task templates: any admin at the site can read them (so the Create Task dropdown

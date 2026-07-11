@@ -40,6 +40,7 @@ export interface UpdateStaffInput {
   email?: string | null
   phone?: string | null
   accountStatus?: AccountStatus
+  staffCode?: string
 }
 
 export interface CreateAreaInput {

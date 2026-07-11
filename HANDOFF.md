@@ -1,8 +1,32 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-11 third session, for the next session)
-**No task in progress.** Newest work — security + branding pass on the logins, plus two real
-superusers:
+## ⏸ Where we left off (2026-07-11 fourth session, for the next session)
+**No task in progress.** Newest work — Staff page management upgrades, all verified in the browser
+against Supabase:
+- **Editable Staff ID**: optional Staff ID field on Add user (auto-generates when blank) and an
+  editable Staff ID field on Edit user. Unique-code clashes surface friendly errors in both repos
+  (`UpdateStaffInput.staffCode` is new).
+- **PIN reset now confirms**: success shows "✓ PIN reset to NNNN…", failures show an inline error
+  (it used to fail silently — see role bug below), button shows "Resetting…" while busy.
+- **Soft delete + restore for staff**: new `deleted` account status (migration `staff_soft_delete`
+  widened the check constraint; schema.sql matches). Delete/Archive/Restore buttons per row with
+  an inline confirm. Deleted users are excluded from "All" and live under a new "Deleted" filter
+  chip; they can't sign in (authenticate_staff requires active) and their unfinished work is
+  unassigned, same as archive. Restore returns them to active. Audit actions: `user_deleted`,
+  `user_restored`.
+- **ROLE BUG FIX (important)**: five RPCs (`reset_staff_pin`, `set_area_frequency`, `update_area`,
+  `create_task_template`, `update_task_template`) and two policies (staff UPDATE, import-batch
+  INSERT) only allowed `super_admin`/`manager` — but every top-tier admin here is `superuser`, so
+  superusers were denied PIN resets and template management, and their staff-row updates silently
+  no-opped (migration `superuser_role_checks`). Also `role_check_null_safety`: guards like
+  `role not in (...)` pass when current_admin_role() is NULL (no admin profile, e.g. anon key) —
+  wrapped in `coalesce(role, '')` across 9 functions. schema.sql updated to match both.
+- Verified end-to-end as thando@: create with custom ID TC-9001, rename to TC-9002, PIN reset
+  5678 (authenticate_staff confirms), delete → Deleted chip → can't sign in → restore → active.
+  Test user removed from the live DB afterwards. Build + lint clean.
+
+## Previous session (2026-07-11, third session)
+**No task in progress.** Security + branding pass on the logins, plus two real superusers:
 - **Demo credential hints removed** from the staff sign-in (`Demo: MB-4471 · PIN 1234` line,
   placeholder now a non-account `AB-1234`), the admin sign-in (demo account list, placeholder now
   `you@cleanproofguard.com`), and the Add-user modal's "password is demo1234" note. NOTE: the demo
