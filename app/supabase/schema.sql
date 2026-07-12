@@ -1199,6 +1199,104 @@ grant execute on function update_schedule(uuid, text, uuid, int, text, int, text
 grant execute on function set_schedule_status(uuid, boolean, boolean) to authenticated;
 grant execute on function duplicate_schedule(uuid) to authenticated;
 
+-- Generate a schedule's occurrences for a date. Idempotent (partial unique index),
+-- skips paused/archived schedules + non-matching recurrence, and drops the assignee
+-- if they're no longer active. A pg_cron job (below) rolls active schedules forward daily.
+create or replace function generate_occurrences_for_schedule(p_schedule_id uuid, p_date date)
+returns int language plpgsql security definer set search_path = public as $$
+declare
+  s cleaning_schedules; v_dow int := extract(dow from p_date);
+  v_win_start timestamp; v_win_end timestamp; v_due timestamp;
+  v_sort int; v_area_id uuid; v_area areas; v_k int; v_n int;
+  v_items text[]; v_break record; v_label text; v_ti int; v_assignment_id uuid;
+  v_staff uuid; v_count int := 0;
+begin
+  select * into s from cleaning_schedules where id = p_schedule_id;
+  if s.id is null or not s.is_active or s.archived_at is not null then return 0; end if;
+  if s.recurrence_type = 'today' then return 0; end if;
+  if s.recurrence_type = 'weekdays' and v_dow not between 1 and 5 then return 0; end if;
+  if s.recurrence_type = 'weekends' and v_dow not in (0, 6) then return 0; end if;
+  if s.recurrence_type = 'custom' then return 0; end if;
+
+  v_n := greatest(1, s.required_cleans_per_day);
+  select id into v_staff from staff where id = s.assigned_user_id and account_status = 'active';
+  if s.checklist_template_id is not null then
+    select array(select jsonb_array_elements_text(checklist_items)) into v_items from task_templates where id = s.checklist_template_id;
+  end if;
+  v_win_start := p_date + s.start_time::time;
+  v_win_end := p_date + s.end_time::time;
+  if v_win_end <= v_win_start then v_win_end := v_win_start + interval '8 hours'; end if;
+  select coalesce(max(sort_order),0) into v_sort from assignments where site_id = s.site_id;
+
+  for v_area_id in select area_id from schedule_areas where schedule_id = s.id order by sort_order loop
+    select * into v_area from areas where id = v_area_id and site_id = s.site_id and active;
+    continue when v_area.id is null;
+    if v_items is null or array_length(v_items,1) is null then
+      select array(select jsonb_array_elements_text(v_area.task_template)) into v_items;
+    end if;
+    for v_k in 1..v_n loop
+      v_due := v_win_start + (v_win_end - v_win_start) * (v_k::numeric / v_n);
+      for v_break in select break_start, break_end from schedule_breaks where schedule_id = s.id loop
+        if v_due::time >= v_break.break_start::time and v_due::time < v_break.break_end::time then
+          v_due := p_date + v_break.break_end::time;
+        end if;
+      end loop;
+      v_sort := v_sort + 1;
+      insert into assignments (site_id, branch_id, area_id, area_name, area_code, staff_id, status, due_at,
+        sort_order, task_type, template_id, template_name, created_by_name, require_photo,
+        schedule_id, occurrence_number, occurrence_total, scheduled_date)
+      values (s.site_id, coalesce(s.branch_id, v_area.branch_id), v_area.id, v_area.name, v_area.code,
+        v_staff, 'todo', v_due::timestamptz, v_sort, 'cleaning', s.checklist_template_id, s.checklist_template_name,
+        'Scheduled', s.require_photo, s.id, v_k, v_n, p_date)
+      on conflict (schedule_id, area_id, occurrence_number, scheduled_date) where schedule_id is not null do nothing
+      returning id into v_assignment_id;
+      if v_assignment_id is not null then
+        v_ti := 0;
+        foreach v_label in array coalesce(v_items, '{}') loop
+          insert into assignment_tasks (assignment_id, label, completed, sort_order) values (v_assignment_id, v_label, false, v_ti);
+          v_ti := v_ti + 1;
+        end loop;
+        v_count := v_count + 1;
+      end if;
+      v_assignment_id := null;
+    end loop;
+    if s.checklist_template_id is null then v_items := null; end if;
+  end loop;
+  update cleaning_schedules set last_generated_date = greatest(coalesce(last_generated_date, p_date), p_date) where id = s.id;
+  return v_count;
+end; $$;
+
+-- Admin-triggered "generate now" for one site (manager+ with branch access).
+create or replace function generate_site_occurrences(p_site_id uuid, p_date date default current_date)
+returns int language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_total int := 0;
+begin
+  if coalesce(current_admin_role(p_site_id), '') not in ('superuser','super_admin','manager') then
+    raise exception 'Not authorized to generate schedule occurrences';
+  end if;
+  for v_id in select id from cleaning_schedules where site_id = p_site_id and is_active and archived_at is null loop
+    if admin_can_manage_schedule(v_id) then v_total := v_total + generate_occurrences_for_schedule(v_id, coalesce(p_date, current_date)); end if;
+  end loop;
+  return v_total;
+end; $$;
+
+-- System-wide daily roll-forward for pg_cron (not granted to app roles).
+create or replace function generate_all_occurrences(p_date date default current_date)
+returns int language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_total int := 0;
+begin
+  for v_id in select id from cleaning_schedules where is_active and archived_at is null loop
+    v_total := v_total + generate_occurrences_for_schedule(v_id, p_date);
+  end loop;
+  return v_total;
+end; $$;
+grant execute on function generate_site_occurrences(uuid, date) to authenticated;
+
+-- Daily roll-forward at 00:05 UTC (requires pg_cron).
+create extension if not exists pg_cron with schema extensions;
+select cron.schedule('daily-schedule-generation', '5 0 * * *', $$select public.generate_all_occurrences(current_date);$$)
+where not exists (select 1 from cron.job where jobname = 'daily-schedule-generation');
+
 -- ————— Cleaning benchmarks (superuser, or benchmarks.manage grant) —————
 
 alter table cleaning_benchmarks enable row level security;

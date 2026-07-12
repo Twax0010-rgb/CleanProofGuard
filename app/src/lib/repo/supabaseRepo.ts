@@ -1166,6 +1166,12 @@ export const supabaseRepo: DataRepo = {
     return schedule
   },
 
+  async generateScheduleOccurrences(siteId) {
+    const { data, error } = await client().rpc('generate_site_occurrences', { p_site_id: siteId })
+    if (error) throw new Error(error.message)
+    return (data as number) ?? 0
+  },
+
   async reopenAssignment(assignmentId, reason) {
     const trimmedReason = reason.trim()
     if (!trimmedReason) throw new Error('A reason is required to reopen a task.')

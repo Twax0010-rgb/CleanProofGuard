@@ -46,8 +46,25 @@ export function SchedulesPanel({
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<CleaningSchedule | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [genMsg, setGenMsg] = useState<string | null>(null)
+  const [generating, setGenerating] = useState(false)
 
   const canManage = canManageSchedules(admin.role)
+
+  async function generateToday() {
+    setGenerating(true)
+    setError(null)
+    setGenMsg(null)
+    try {
+      const n = await repo.generateScheduleOccurrences(admin.siteId)
+      setGenMsg(n > 0 ? `Generated ${n} new occurrence${n === 1 ? '' : 's'} for today.` : 'Today’s occurrences are already up to date.')
+      onChanged()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not generate occurrences.')
+    } finally {
+      setGenerating(false)
+    }
+  }
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff])
   const catName = (id: string | null) => (id ? categories.find((c) => c.id === id)?.name ?? '—' : '—')
   const branchName = (id: string | null) => (id ? branches.find((b) => b.id === id)?.name ?? '—' : 'All branches')
@@ -84,8 +101,15 @@ export function SchedulesPanel({
         {(['active', 'paused', 'archived', 'all'] as const).map((f) => (
           <button key={f} onClick={() => setStatusFilter(f)} className={`rounded-full px-3.5 py-1.5 text-xs font-bold capitalize ${statusFilter === f ? 'bg-ink text-white' : 'border border-line bg-white text-ink-soft'}`}>{f}</button>
         ))}
+        {canManage && (
+          <button onClick={generateToday} disabled={generating} className="ml-auto flex h-9 items-center gap-1.5 rounded-[11px] border border-line bg-white px-3.5 text-sm font-bold text-ink-soft disabled:opacity-50" title="Runs the same generation as the daily job">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6" /></svg>
+            {generating ? 'Generating…' : 'Generate today'}
+          </button>
+        )}
       </div>
 
+      {genMsg && <div className="mb-3 rounded-xl border border-verified-tint bg-verified-tint/40 px-4 py-2.5 text-[13px] font-medium text-verified-ink">{genMsg}</div>}
       {error && <div className="mb-3 rounded-xl border border-overdue/30 bg-overdue/5 px-4 py-2.5 text-[13px] font-medium text-overdue">{error}</div>}
 
       <div className="overflow-hidden rounded-2xl border border-line bg-white">

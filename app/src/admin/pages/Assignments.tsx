@@ -260,7 +260,10 @@ export function Assignments() {
           areas={areas}
           categories={categories}
           branches={branches}
-          onChanged={() => repo.listSchedules(admin.siteId).then(setSchedules)}
+          onChanged={() => {
+            repo.listSchedules(admin.siteId).then(setSchedules)
+            repo.getSiteAssignments(admin.siteId).then(setAssignments)
+          }}
         />
       ) : (
       <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>

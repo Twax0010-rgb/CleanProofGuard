@@ -57,10 +57,21 @@ schema.sql mirrored. Mock now stores schedule definitions (`state.schedules`, ke
 `cpg_mock_state_v19`; `CleaningSchedule` gained `lastGeneratedDate`). Verified in browser: list with
 0/8 completion, Pause, Duplicate, Edit cleans 4→3; test copy removed + original restored.
 
+**Daily occurrence regeneration — DONE (2026-07-12 session 7d):** `generate_occurrences_for_schedule
+(schedule_id, date)` — idempotent (partial unique index), recurrence-aware (daily always, weekdays
+Mon-Fri, weekends Sat/Sun; 'today'/'custom' skipped by the daily job), drops the assignee if they're
+no longer active, resolves checklist from the schedule's template or each area's own, updates
+`last_generated_date`. `generate_site_occurrences(site, date=today)` (manager+, for the admin button)
+and `generate_all_occurrences(date=today)` (system, for cron). A **pg_cron job**
+`daily-schedule-generation` runs `generate_all_occurrences(current_date)` at 00:05 UTC (extension
+enabled). A **"Generate today" button** on the Schedules tab triggers it manually (repo
+`generateScheduleOccurrences`). Migrations `schedule_occurrence_generation`, `schedule_daily_cron`;
+schema.sql mirrored; mock mirrors it. Verified: generator made 8 for a future date then 0 on re-run
+(idempotent); button reports "already up to date"; cron job active. NOTE: "missed" occurrences aren't
+a separate status — they show as `overdue` via effectiveStatus (past due_at, still todo); reports can
+treat end-of-day overdue as missed.
+
 **Remaining from this spec (NOT built yet — next slices, in the user's stated priority order):**
-1. Daily occurrence regeneration (currently only "today" is generated at create time; needs a cron/
-   edge function to roll active schedules forward each day and mark missed occurrences). schema has
-   `last_generated_date` ready; a generator RPC + scheduled task would complete it.
 4. Scheduled-Clean report + the flexible report builder (selectable fields, CSV/Excel/**PDF**,
    presets, branch-scoped) and the "everything reportable" report-type list.
 5. Staff-app scheduled-task view polish (occurrence count / due-by labels).

@@ -1194,6 +1194,52 @@ export const mockRepo: DataRepo = {
     return delay(copy)
   },
 
+  async generateScheduleOccurrences(siteId) {
+    requireAdmin((a) => a.role === 'superuser' || a.role === 'super_admin' || a.role === 'manager', 'generate schedule occurrences')
+    const day = new Date()
+    const todayStr = day.toISOString().slice(0, 10)
+    const dow = day.getDay()
+    let count = 0
+    for (const s of (state.schedules ?? []).filter((x) => x.siteId === siteId && x.isActive && !x.archivedAt)) {
+      if (s.recurrenceType === 'today' || s.recurrenceType === 'custom') continue
+      if (s.recurrenceType === 'weekdays' && (dow === 0 || dow === 6)) continue
+      if (s.recurrenceType === 'weekends' && dow !== 0 && dow !== 6) continue
+      const n = Math.max(1, s.requiredCleansPerDay)
+      const [sh, sm] = s.startTime.split(':').map(Number)
+      const [eh, em] = s.endTime.split(':').map(Number)
+      const winStart = new Date(day); winStart.setHours(sh, sm, 0, 0)
+      let winEnd = new Date(day); winEnd.setHours(eh, em, 0, 0)
+      if (winEnd <= winStart) winEnd = new Date(winStart.getTime() + 8 * 3600_000)
+      // Don't hand future work to a disabled/archived cleaner.
+      const staffOk = s.assignedUserId && state.staff.find((st) => st.id === s.assignedUserId && st.accountStatus === 'active')
+      const staffId = staffOk ? s.assignedUserId : null
+      let maxSort = Math.max(0, ...state.assignments.filter((a) => a.siteId === siteId).map((a) => a.sortOrder))
+      for (const areaId of s.areaIds) {
+        const area = state.areas.find((a) => a.id === areaId && a.active)
+        if (!area) continue
+        for (let k = 1; k <= n; k++) {
+          // Idempotent: skip if this occurrence already exists for today.
+          const exists = state.assignments.some(
+            (a) => a.scheduleId === s.id && a.areaId === areaId && a.occurrenceNumber === k &&
+              (a.dueAt ? a.dueAt.slice(0, 10) === todayStr : false),
+          )
+          if (exists) continue
+          const due = new Date(winStart.getTime() + ((winEnd.getTime() - winStart.getTime()) * k) / n)
+          maxSort += 1
+          const asg = buildAssignmentFor(area, staffId, maxSort, due.toISOString(), {
+            taskType: 'cleaning', createdByName: 'Scheduled', requirePhoto: s.requirePhoto,
+            scheduleId: s.id, occurrenceNumber: k, occurrenceTotal: n,
+          })
+          state.assignments = [...state.assignments, asg]
+          count += 1
+        }
+      }
+      state.schedules = state.schedules.map((x) => (x.id === s.id ? { ...x, lastGeneratedDate: todayStr } : x))
+    }
+    persist()
+    return delay(count)
+  },
+
   async updateTaskDetails(assignmentId, patch) {
     requireRole(canManageRoutes, 'edit a task')
     const before = findAssignment(assignmentId)

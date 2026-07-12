@@ -431,6 +431,8 @@ export interface DataRepo {
   setScheduleStatus(scheduleId: string, isActive: boolean, archived: boolean): Promise<CleaningSchedule>
   /** Copy a schedule (paused, no occurrences generated). Returns the new schedule. */
   duplicateSchedule(scheduleId: string): Promise<CleaningSchedule>
+  /** Generate today's occurrences now for the site's active schedules (idempotent). Returns rows created. Mirrors the daily cron. */
+  generateScheduleOccurrences(siteId: string): Promise<number>
   /** Moves a completed task back to Pending. Requires a reason, which is recorded in the audit trail. Throws if the assignment isn't currently done. */
   reopenAssignment(assignmentId: string, reason: string): Promise<Assignment>
   /** Edits a not-yet-completed task's type/priority/due date. Throws if the assignment is already done. */
