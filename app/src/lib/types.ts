@@ -370,6 +370,7 @@ export type ReportType =
   | 'locations'
   | 'issues'
   | 'overdue_sla'
+  | 'transit'
   | 'photo_proof'
   | 'qr_scans'
   | 'benchmarks'

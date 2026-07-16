@@ -5,10 +5,11 @@ import { DateRangePicker } from '../../components/ui/DateRangePicker'
 import { StatusPill } from '../../components/ui/StatusPill'
 import { useAdminAuth } from '../../contexts/AdminAuthContext'
 import { inActiveBranch, useBranch } from '../../contexts/BranchContext'
-import { activeStaff, canManageRoutes, computeSiteKpis, deriveActivity, formatClock } from '../../lib/domain'
+import { activeStaff, canManageRoutes, computeSiteKpis, deriveActivity, formatClock, formatDuration } from '../../lib/domain'
 import { repo } from '../../lib/repo'
-import { filterAssignmentsInRange, filterIssuesInRange, formatDateRangeLabel, resolveDateRange } from '../../lib/reports'
+import { filterAssignmentsInRange, filterIssuesInRange, formatDateRangeLabel, isoInRange, resolveDateRange } from '../../lib/reports'
 import type { DateRange } from '../../lib/reports'
+import { deriveTransitPeriods, formatTransit, idleNow, TRANSIT_THRESHOLD_MS } from '../../lib/transit'
 import type { Assignment, Issue, Staff } from '../../lib/types'
 import { AdminLayout } from '../AdminLayout'
 
@@ -47,6 +48,22 @@ export function Overview() {
   const branchIssues = useMemo(() => issues.filter((i) => inActiveBranch(i.branchId, activeBranchId)), [issues, activeBranchId])
   const rangeAssignments = useMemo(() => filterAssignmentsInRange(branchAssignments, range), [branchAssignments, range])
   const rangeIssues = useMemo(() => filterIssuesInRange(branchIssues, range), [branchIssues, range])
+
+  // Derived from every assignment, not the range-filtered set: a gap is measured between two cleans,
+  // and slicing the list first would drop the clean on the far side of the boundary and invent a gap
+  // that doesn't exist. The range is applied to the finished periods afterwards instead.
+  const transitPeriods = useMemo(() => deriveTransitPeriods(branchAssignments, branchStaff), [branchAssignments, branchStaff])
+  const idle = useMemo(() => idleNow(transitPeriods), [transitPeriods])
+  const rangeTransit = useMemo(
+    () => transitPeriods.filter((p) => !p.open && isoInRange(p.startedAt, range)),
+    [transitPeriods, range],
+  )
+  const transitTotalMs = useMemo(() => rangeTransit.reduce((sum, p) => sum + p.durationMs, 0), [rangeTransit])
+  /** What a supervisor could actually hand an idle cleaner right now. */
+  const unassignedCount = useMemo(
+    () => branchAssignments.filter((a) => !a.staffId && a.status !== 'done').length,
+    [branchAssignments],
+  )
   const staffById = useMemo(() => new Map(branchStaff.map((s) => [s.id, s])), [branchStaff])
   const kpis = useMemo(() => computeSiteKpis(rangeAssignments, branchStaff, rangeIssues), [rangeAssignments, branchStaff, rangeIssues])
   const query = search.trim().toLowerCase()
@@ -306,6 +323,56 @@ export function Overview() {
                   </div>
                 )
               })}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-line bg-white p-4.5">
+            <div className="mb-1 flex items-center justify-between">
+              <div className="text-base font-extrabold">Between areas</div>
+              {idle.length > 0 && (
+                <span className="font-mono text-[11px] font-semibold text-attention">
+                  {idle.length} OVER {formatDuration(TRANSIT_THRESHOLD_MS)}
+                </span>
+              )}
+            </div>
+            <p className="mb-3 text-[11px] leading-tight text-muted">
+              Time between finishing one clean and scanning into the next.
+            </p>
+
+            <div className="flex flex-col gap-3">
+              {idle.length === 0 ? (
+                <div className="py-4 text-center text-sm text-muted">
+                  Nobody has been waiting more than {formatDuration(TRANSIT_THRESHOLD_MS)}.
+                </div>
+              ) : (
+                idle.map((p) => (
+                  <div key={p.id} className="flex items-center gap-2.75">
+                    <Avatar initials={p.staffInitials} colorHex={p.staffColorHex} size={30} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-bold">{p.staffName}</div>
+                      <div className="truncate text-[11px] text-muted">since {p.fromAreaName}</div>
+                    </div>
+                    <span className="flex-shrink-0 font-mono text-[11px] font-semibold text-attention">
+                      {formatTransit(p.durationMs)}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {idle.length > 0 && unassignedCount > 0 && canManageRoutes(admin.role) && (
+              <button
+                onClick={() => navigate('/admin/assignments')}
+                className="mt-3.5 w-full rounded-xl bg-app py-2 text-xs font-bold text-ink-soft"
+              >
+                {unassignedCount} unassigned {unassignedCount === 1 ? 'job' : 'jobs'} to hand out →
+              </button>
+            )}
+
+            <div className="mt-3.5 border-t border-line-softer pt-2.5 text-[11px] text-muted">
+              {rangeTransit.length === 0
+                ? 'No completed gaps in this range.'
+                : `${formatDuration(transitTotalMs)} across ${rangeTransit.length} ${rangeTransit.length === 1 ? 'gap' : 'gaps'} · longest ${formatDuration(Math.max(...rangeTransit.map((p) => p.durationMs)))}`}
             </div>
           </div>
         </div>

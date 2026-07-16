@@ -1,6 +1,45 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-16 session 7f, for the next session)
+## ⏸ Where we left off (2026-07-16 session 7g, for the next session)
+**Transit / inactive-time tracking — first slice DONE.** The last big feature from the spec.
+Verified against Supabase; every number below was hand-checked against the raw timestamps first.
+
+**It's derived, not stored — no migration, no new tables.** `src/lib/transit.ts` computes gaps from
+the scan-in/scan-out stamps already on assignments (`startedAt` → `submittedAt`), the same way
+`deriveActivity` builds the live feed and occurrences reuse `assignments`. A transit period is
+"finished one clean, hasn't scanned into the next".
+- **What it honestly cannot do:** tell walking from a tea break from standing still. A gap is a gap.
+  `TRANSIT_THRESHOLD_MS` (15m default, overridable per call so it can be wired to a per-branch
+  setting later) decides which gaps are *worth asking about* — it is not a verdict on anyone.
+- **Two rules worth keeping** (both found by checking real data, not by reasoning):
+  1. An **open** gap only counts if the last clean ended **today** and the staffer is on shift.
+     Without the same-day bound, the demo's stale `on_shift` flags reported people as standing in a
+     corridor for six days. A stale flag is not evidence of where someone is.
+  2. **Overlapping scans produce no period.** If they scanned into the next area before submitting
+     the last, there was no gap; clamping to zero would invent one.
+- Derive from **all** branch assignments, never a range-filtered list — slicing first drops the
+  clean on the far side of the boundary and invents a gap. Filter the periods afterwards.
+
+**Surfaces:** a **Transit / inactive-time report** (12 → 13 report types; derives from the context's
+own assignments+staff, so `ReportContext` was untouched) with a **"Long gaps between areas"** preset;
+a **"Between areas" card on the Overview** — who's over the threshold right now, since which area,
+plus a **redeployment nudge** ("3 unassigned jobs to hand out →", manager+ only) and a per-range
+total; and **idle labels on the board's staff columns** ("between areas 33m", today's board only —
+an open gap is a live fact, not something a past day has).
+
+**Verified:** Sikha 34m open/flagged (she submitted a real proof photo at 1:30 PM and hasn't scanned
+since); Sipho 42m, Lindiwe 35m, Nomsa 50m all flagged; **Marcus 5m correctly NOT flagged** (normal
+walking) — all matching the raw timestamps exactly. Card, board label and report agree.
+
+**Not built (next slices):** configurable per-branch thresholds (the engine already takes the
+threshold as a parameter — wire it to a setting), shift-start-to-first-scan lag (deliberately left
+to the existing `not_started` alert rather than double-counting it as transit), and transit
+trend/History charts.
+
+**Remaining from the spec:** staff-app scheduled-task view polish (occurrence count / due-by labels)
+is now the only untouched item.
+
+## Previous session (2026-07-16, session 7f)
 **Free scan + a real branch bug.** Verified against Supabase as AR-2290 (Aisha Rahman, demo PIN).
 
 **Staff can now scan an area that isn't on their route.** The scan flow was assignment-first — you

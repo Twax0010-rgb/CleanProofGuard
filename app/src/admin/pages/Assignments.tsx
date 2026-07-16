@@ -9,6 +9,7 @@ import { canManageTemplates, activeStaff, canManageRoutes, effectiveStatus, form
 import { repo } from '../../lib/repo'
 import { filterAssignmentsInRange, formatDateRangeLabel, resolveDateRange } from '../../lib/reports'
 import type { DateRange } from '../../lib/reports'
+import { deriveTransitPeriods, formatTransit, idleNow } from '../../lib/transit'
 import type { Area, Assignment, Benchmark, CleaningSchedule, LocationCategory, Staff, TaskPriority, TaskTemplate, TaskType } from '../../lib/types'
 import { Field, inputCls } from '../../components/ui/Modal'
 import { AdminLayout } from '../AdminLayout'
@@ -104,6 +105,13 @@ export function Assignments() {
     const assignedIds = new Set(rangeAssignments.map((a) => a.staffId).filter((id): id is string => !!id))
     return branchStaff.filter((s) => assignedIds.has(s.id)).sort((a, b) => a.fullName.localeCompare(b.fullName))
   }, [isToday, onShiftStaff, rangeAssignments, branchStaff])
+
+  /** How long each staff member has been between areas right now, for the column headers. Only
+   * meaningful on today's board — an idle stretch is a live fact, not something a past day has. */
+  const idleByStaff = useMemo(() => {
+    if (!isToday) return new Map<string, number>()
+    return new Map(idleNow(deriveTransitPeriods(branchAssignments, branchStaff)).map((p) => [p.staffId, p.durationMs]))
+  }, [isToday, branchAssignments, branchStaff])
 
   async function commitReassign(assignment: Assignment, targetStaffId: string | null) {
     setAssignments((prev) =>
@@ -300,12 +308,24 @@ export function Assignments() {
             const ongoing = mine.filter((a) => a.status === 'in_progress')
             const pending = mine.filter((a) => a.status === 'todo')
             const completed = mine.filter((a) => a.status === 'done')
+            const idleMs = idleByStaff.get(s.id)
             return (
               <Column
                 key={s.id}
                 id={s.id}
                 title={s.fullName}
-                subtitle={`${mine.length} areas · ${completed.length === mine.length && mine.length > 0 ? 'complete' : 'Day shift'}`}
+                subtitle={
+                  idleMs === undefined ? (
+                    `${mine.length} ${mine.length === 1 ? 'area' : 'areas'} · ${
+                      completed.length === mine.length && mine.length > 0 ? 'complete' : 'Day shift'
+                    }`
+                  ) : (
+                    <>
+                      {mine.length} {mine.length === 1 ? 'area' : 'areas'} ·{' '}
+                      <span className="font-semibold text-attention">between areas {formatTransit(idleMs)}</span>
+                    </>
+                  )
+                }
                 avatar={<Avatar initials={s.initials} colorHex={s.colorHex} size={32} />}
               >
                 {ongoing.length > 0 && (
@@ -542,7 +562,7 @@ function Column({
 }: {
   id: string
   title: string
-  subtitle?: string
+  subtitle?: React.ReactNode
   count?: number
   countTone?: 'overdue'
   avatar?: React.ReactNode

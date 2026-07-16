@@ -11,6 +11,7 @@ import {
   TASK_TYPE_LABELS,
   taskProgress,
 } from './domain'
+import { deriveTransitPeriods } from './transit'
 import type { Area, Assignment, AuditLogEntry, Benchmark, Branch, CleaningSchedule, Issue, LocationCategory, ReportType, Staff } from './types'
 
 // --- Date ranges -------------------------------------------------------
@@ -153,6 +154,7 @@ export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
   locations: 'Location report',
   issues: 'Issue report',
   overdue_sla: 'Overdue / SLA report',
+  transit: 'Transit / inactive-time report',
   photo_proof: 'Photo proof report',
   qr_scans: 'QR scan report',
   benchmarks: 'Benchmark report',
@@ -169,6 +171,7 @@ export const REPORT_TYPE_HINTS: Record<ReportType, string> = {
   locations: 'Per area: frequency, last clean, activity in range',
   issues: 'Problems staff reported, and whether they were resolved',
   overdue_sla: 'Work that blew its due time',
+  transit: 'Time between areas — the gaps, not who to blame',
   photo_proof: 'Every before/after photo and its review state',
   qr_scans: 'Where and when staff scanned in',
   benchmarks: 'The cleaning-frequency standards themselves',
@@ -184,6 +187,7 @@ export const REPORT_TYPES: ReportType[] = [
   'locations',
   'issues',
   'overdue_sla',
+  'transit',
   'photo_proof',
   'qr_scans',
   'benchmarks',
@@ -396,6 +400,21 @@ export const REPORT_FIELDS: Record<ReportType, ReportField[]> = {
     { key: 'source', label: 'Source', category: 'SLA/performance' },
     { key: 'scheduleName', label: 'Schedule', category: 'SLA/performance' },
   ],
+  transit: [
+    { key: 'date', label: 'Date', category: 'Date & time' },
+    { key: 'leftAt', label: 'Left at', category: 'Date & time' },
+    { key: 'arrivedAt', label: 'Arrived at', category: 'Date & time' },
+    { key: 'durationMin', label: 'Gap (min)', category: 'Transit' },
+    { key: 'flagged', label: 'Over threshold', category: 'Transit' },
+    { key: 'state', label: 'State', category: 'Transit' },
+    { key: 'staffName', label: 'Staff', category: 'Staff' },
+    { key: 'staffCode', label: 'Staff ID', category: 'Staff' },
+    ...BRANCH_FIELDS,
+    { key: 'fromArea', label: 'Left area', category: 'Location' },
+    { key: 'fromAreaCode', label: 'Left area code', category: 'Location' },
+    { key: 'toArea', label: 'Next area', category: 'Location' },
+    { key: 'toAreaCode', label: 'Next area code', category: 'Location' },
+  ],
   photo_proof: [
     { key: 'date', label: 'Date', category: 'Date & time' },
     { key: 'submittedTime', label: 'Submitted time', category: 'Date & time' },
@@ -456,6 +475,7 @@ const REPORT_DEFAULT_FIELDS: Record<ReportType, string[]> = {
   locations: ['areaName', 'areaCode', 'category', 'frequency', 'status', 'lastCleanedAt', 'cleanedCount', 'overdueCount'],
   issues: ['date', 'time', 'areaName', 'areaCode', 'staffName', 'severity', 'status', 'description'],
   overdue_sla: ['date', 'areaName', 'areaCode', 'staffName', 'dueTime', 'status', 'minutesLate', 'source'],
+  transit: ['date', 'staffName', 'fromArea', 'leftAt', 'toArea', 'arrivedAt', 'durationMin', 'flagged', 'state'],
   photo_proof: ['date', 'submittedTime', 'areaName', 'areaCode', 'staffName', 'label', 'reviewStatus', 'reviewedByName'],
   qr_scans: ['date', 'scanTime', 'areaName', 'areaCode', 'staffName'],
   benchmarks: ['name', 'scope', 'category', 'requiredCleans', 'interval', 'photoRequired', 'status', 'areasCovered'],
@@ -710,6 +730,30 @@ export function buildReportRows(type: ReportType, ctx: ReportContext, range: Dat
           }
         })
 
+    case 'transit':
+      // Derived from the same scan-in/scan-out stamps the rest of the app runs on, so it needs
+      // nothing extra in the context. A period belongs to the day the gap opened.
+      return deriveTransitPeriods(ctx.assignments, ctx.staff)
+        .filter((p) => isoInRange(p.startedAt, range))
+        .map((p) => {
+          const staffMember = staffById.get(p.staffId)
+          return {
+            date: dateOnly(p.startedAt),
+            leftAt: formatClock(p.startedAt),
+            arrivedAt: p.endedAt ? formatClock(p.endedAt) : '—',
+            durationMin: Math.round(p.durationMs / 60000),
+            flagged: p.overThreshold ? 'Yes' : 'No',
+            state: p.open ? 'Still between areas' : 'Arrived',
+            staffName: p.staffName,
+            staffCode: staffMember?.staffCode ?? '',
+            ...branchCols(p.branchId),
+            fromArea: p.fromAreaName,
+            fromAreaCode: p.fromAreaCode,
+            toArea: p.toAreaName ?? '—',
+            toAreaCode: p.toAreaCode ?? '',
+          }
+        })
+
     case 'photo_proof':
       return ctx.assignments
         .filter((a) => a.photos.length > 0 && isoInRange(a.submittedAt, range))
@@ -856,6 +900,17 @@ export const REPORT_PRESETS: ReportPreset[] = [
     reportType: 'photo_proof',
     range: 'this_week',
     filter: { key: 'reviewStatus', value: PHOTO_REVIEW_LABELS.pending, label: 'Pending review only' },
+  },
+  {
+    id: 'long_transit',
+    name: 'Long gaps between areas',
+    description: 'Time unaccounted for between one clean and the next',
+    reportType: 'transit',
+    range: 'this_week',
+    groupBy: 'staffName',
+    sortBy: 'durationMin',
+    sortDir: 'desc',
+    filter: { key: 'flagged', value: 'Yes', label: 'Over threshold only' },
   },
   {
     id: 'late_finishes',
