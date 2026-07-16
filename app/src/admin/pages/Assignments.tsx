@@ -779,6 +779,15 @@ function Card({
               {TASK_PRIORITY_LABELS[assignment.priority]}
             </span>
           )}
+          {/* The cleaner left a note. The card is too small to print it, but hiding it entirely is
+              how it went unnoticed until now — the icon carries the text on hover. */}
+          {assignment.note && (
+            <span title={assignment.note} className="flex-shrink-0 text-verified-ink">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 5h16M4 10h16M4 15h9" />
+              </svg>
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 truncate font-mono text-[11px] text-muted">
           <span

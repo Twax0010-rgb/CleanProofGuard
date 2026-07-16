@@ -31,6 +31,8 @@ interface PhotoSet {
   taskType: TaskType
   capturedAt: string
   hasOpenIssue: boolean
+  /** The cleaner's own note on this proof — context for the review, not a verdict on it. */
+  staffNote: string | null
   before: ProofPhotoView | null
   after: ProofPhotoView | null
   photos: ProofPhotoView[]
@@ -65,6 +67,7 @@ function groupIntoSets(photos: ProofPhotoView[]): PhotoSet[] {
       taskType: first.taskType,
       capturedAt: first.capturedAt,
       hasOpenIssue: first.hasOpenIssue,
+      staffNote: first.staffNote,
       before: list.find((p) => p.label === 'before') ?? null,
       after: list.find((p) => p.label === 'after') ?? null,
       photos: list,
@@ -138,7 +141,8 @@ export function Photos() {
     const rows = photos.map((p) => ({
       branch: p.branchName, branch_code: p.branchCode, area: p.areaName, area_code: p.areaCode,
       staff: p.staffName ?? '', task_type: TASK_TYPE_LABELS[p.taskType], photo_type: p.label,
-      captured: new Date(p.capturedAt).toLocaleString(), review_status: PHOTO_REVIEW_LABELS[p.reviewStatus], proof_log: p.assignmentId,
+      captured: new Date(p.capturedAt).toLocaleString(), staff_note: p.staffNote ?? '',
+      review_status: PHOTO_REVIEW_LABELS[p.reviewStatus], review_note: p.reviewNote ?? '', proof_log: p.assignmentId,
     }))
     const fields = [
       { key: 'branch', label: 'Branch', category: 'Photo' as const },
@@ -149,7 +153,9 @@ export function Photos() {
       { key: 'task_type', label: 'Task type', category: 'Photo' as const },
       { key: 'photo_type', label: 'Photo type', category: 'Photo' as const },
       { key: 'captured', label: 'Captured', category: 'Photo' as const },
+      { key: 'staff_note', label: 'Staff note', category: 'Photo' as const },
       { key: 'review_status', label: 'Review status', category: 'Photo' as const },
+      { key: 'review_note', label: 'Review note', category: 'Photo' as const },
       { key: 'proof_log', label: 'Proof log', category: 'Photo' as const },
     ]
     exportRowsToCsv(rows, fields, `Photo_proof_${toLocalDateStamp(new Date())}`)
@@ -287,10 +293,22 @@ function SetGrid({ sets, onOpen, onQuickReview, dimmed = false }: { sets: PhotoS
           <div className="p-2.5">
             <div className="truncate text-[13px] font-bold">{set.areaName}</div>
             <div className="truncate font-mono text-[10.5px] text-muted">{set.branchCode} · {set.areaCode}</div>
-            <div className="mt-1 flex items-center justify-between text-[11px] text-ink-soft">
-              <span className="truncate">{set.staffName ?? 'Unassigned'}</span>
-              <span className="font-mono text-muted">{formatClock(set.capturedAt)}</span>
+            <div className="mt-1 flex items-center justify-between gap-1.5 text-[11px] text-ink-soft">
+              <span className="flex min-w-0 items-center gap-1">
+                {/* The card can be approved without opening it, so a note has to be visible from
+                    here — otherwise "couldn't reach the back corner" gets approved unread. */}
+                {set.staffNote && (
+                  <span title={set.staffNote} className="flex-shrink-0 text-verified-ink">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 5h16M4 10h16M4 15h9" />
+                    </svg>
+                  </span>
+                )}
+                <span className="truncate">{set.staffName ?? 'Unassigned'}</span>
+              </span>
+              <span className="flex-shrink-0 font-mono text-muted">{formatClock(set.capturedAt)}</span>
             </div>
+            {set.staffNote && <div className="mt-1 truncate text-[11px] italic text-muted">“{set.staffNote}”</div>}
           </div>
           {set.status === 'pending' && (
             <div className="flex gap-1.5 px-2.5 pb-2.5" onClick={(e) => e.stopPropagation()}>
@@ -358,6 +376,14 @@ function SetDetail({ set, onReview, onClose }: { set: PhotoSet; onReview: (set: 
             <div className="text-lg font-extrabold">{set.areaName}</div>
             <div className="font-mono text-xs text-muted">{set.areaCode}</div>
           </div>
+          {/* Above the metadata and the review buttons on purpose: if the cleaner left a note, it's
+              usually the reason the photos look the way they do, and it should be read first. */}
+          {set.staffNote && (
+            <div className="rounded-xl border-l-2 border-line border-l-verified bg-app p-3">
+              <div className="mb-1 text-xs font-semibold text-ink-soft">Note from {set.staffName ?? 'the cleaner'}</div>
+              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{set.staffNote}</p>
+            </div>
+          )}
           <dl className="flex flex-col divide-y divide-line-softer text-sm">
             <Row k="Branch" v={`${set.branchName} · ${set.branchCode}`} />
             <Row k="Task type" v={TASK_TYPE_LABELS[set.taskType]} />

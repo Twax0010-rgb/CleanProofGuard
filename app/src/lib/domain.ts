@@ -441,7 +441,11 @@ export function deriveActivity(
         staffColorHex: staff?.colorHex ?? null,
         areaName: a.areaName,
         areaCode: a.areaCode,
-        detail: `${done}/${total} tasks · ${a.photos.length} photo${a.photos.length === 1 ? '' : 's'}`,
+        // A note is the cleaner telling someone something, so it belongs in the feed the moment
+        // the proof lands rather than only inside the photo drawer.
+        detail: [`${done}/${total} tasks · ${a.photos.length} photo${a.photos.length === 1 ? '' : 's'}`, a.note?.trim() ? `“${a.note.trim()}”` : null]
+          .filter(Boolean)
+          .join(' · '),
         timestamp: a.submittedAt,
       })
     } else if (a.status === 'in_progress' && a.startedAt) {

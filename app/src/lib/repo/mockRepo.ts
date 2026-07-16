@@ -251,6 +251,7 @@ function photoViewsForAssignment(a: Assignment): ProofPhotoView[] {
     capturedAt: capturedFallback,
     assignmentStatus: a.status,
     hasOpenIssue,
+    staffNote: a.note,
     reviewStatus: p.reviewStatus ?? 'pending',
     reviewNote: p.reviewNote ?? null,
     reviewedByName: p.reviewedByName ?? null,

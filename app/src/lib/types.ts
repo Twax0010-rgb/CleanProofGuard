@@ -433,6 +433,10 @@ export interface ProofPhotoView {
   capturedAt: string
   assignmentStatus: AssignmentStatus
   hasOpenIssue: boolean
+  /** What the cleaner wrote when they submitted the proof — their side of the story, and the thing
+   * a reviewer most needs before judging the photos. Distinct from reviewNote, which is the
+   * supervisor's verdict written afterwards. */
+  staffNote: string | null
   reviewStatus: PhotoReviewStatus
   reviewNote: string | null
   reviewedByName: string | null

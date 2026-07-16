@@ -1541,7 +1541,7 @@ export const supabaseRepo: DataRepo = {
         areaId: a.areaId, areaName: a.areaName, areaCode: a.areaCode, staffId: a.staffId,
         staffName: a.staffId ? staffById.get(a.staffId) ?? null : null, taskType: a.taskType, label: p.label,
         dataUrl: p.dataUrl, capturedAt: a.submittedAt ?? a.startedAt ?? a.dueAt ?? new Date().toISOString(),
-        assignmentStatus: a.status, hasOpenIssue: false, reviewStatus: p.reviewStatus ?? 'pending',
+        assignmentStatus: a.status, hasOpenIssue: false, staffNote: a.note, reviewStatus: p.reviewStatus ?? 'pending',
         reviewNote: p.reviewNote ?? null, reviewedByName: p.reviewedByName ?? null,
       })),
     )
