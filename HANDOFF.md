@@ -1,6 +1,65 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-11 seventh session, for the next session)
+## ⏸ Where we left off (2026-07-16 session 7e, for the next session)
+**No task in progress.** This session delivered **item 4 of the spec — the Scheduled-Clean report +
+the flexible report builder**. Verified in the browser against Supabase as owen@ (demo superuser —
+the real thando@/sikha@ passwords were deliberately not used).
+
+**Four new report types** (the builder now has 12, "everything reportable"):
+- **`scheduled_clean`** — one row per schedule occurrence: schedule, "2 of 4", due-by, cleaned-at,
+  **Outcome**, on-time, minutes late, benchmark cleans/day + meets-benchmark, branch, area,
+  category, staff, tasks, photos. Sorted by due time then occurrence. **"Missed" is derived, not
+  stored**: `occurrenceOutcome()` = done → Completed, in_progress → In progress, else overdue via
+  `effectiveStatus` → Missed, otherwise Pending. (Matches the note from session 7d.)
+- **`schedule_compliance`** — one row per schedule: required vs occurrences due / completed /
+  missed / still-due, **compliance %**, on-time %, vs the live benchmark. Worst compliance first.
+  Keeps active schedules that generated nothing (that's a finding); drops archived empty ones.
+- **`photo_proof`** — one row per proof photo (before/after, review status, reviewer, note).
+- **`benchmarks`** — the standing benchmark table + how many areas each covers (reference report,
+  so the date range deliberately doesn't filter it).
+- Existing types gained columns too: **Branch/Branch code on every report** (an all-branches export
+  couldn't tell rows apart before), Source + Schedule on assignments/overdue, scheduled-work
+  counts on staff performance, benchmark on locations.
+
+**Report builder upgrades:** a **"Start from" preset list** (7 built-in presets — Today's scheduled
+cleans, Missed scheduled cleans, Benchmark compliance, Today's proof pack, Photos awaiting review,
+Late finishes, Staff scorecard) that set type+fields+range+group+sort, and can carry a **row filter**
+shown as a dismissible chip (`ReportRowFilter`); per-type one-line hints; curated **default field
+sets** (`REPORT_DEFAULT_FIELDS`) instead of "every field on"; the branch label + row count in the
+toolbar; and a **PDF rebuilt as a real document** — letterhead, Branch/Period/Filter/Grouped-by/Rows/
+Generated-by facts, group sections, A4 landscape, repeating header, Touchstone footer. Still
+print-to-PDF (no PDF dependency) — deliberate, as before.
+
+**Three bugs found and fixed along the way:**
+1. **Column reorder was a no-op** — `displayFields` was built by filtering the field *catalogue*, so
+   the ↑/↓ buttons reordered state that nothing read. Now built from `selectedFields` order, so the
+   table *and* the exports reorder. (Pre-existing, since the builder was written.)
+2. **PDF silently dropped grouping** when grouped by a column that isn't displayed (it resolved the
+   group key by searching visible fields). `PdfReportMeta.groupBy` now carries `{key,label}`.
+3. **Loading a saved template kept a preset's row filter**, silently narrowing its rows (introduced
+   this session; `loadTemplate` now clears it).
+
+**No migration needed** — `report_templates.report_type` is plain `text` with no CHECK constraint;
+saving a `scheduled_clean` template to the live DB was verified and the test row deleted afterwards.
+`SCHEDULE_RECURRENCE_LABELS` moved from SchedulesPanel into domain.ts (reports needed it too).
+Mock seed key **unchanged** (`cpg_mock_state_v19`) — no seed-shape change. Build + lint clean.
+
+**Verified against the live DB:** scheduled_clean showed 8 occurrences of "Morning restroom clean"
+today, the 2 past-due ones reading Missed — matching the Overview's 2 overdue areas exactly;
+compliance showed 32 due this week (4 days × 2 areas × 4 cleans) / 0 done / 26 missed / 0% with the
+live Bathroom benchmark of 4/day → Meets benchmark Yes; the 7 seeded benchmarks listed with
+branch-scoped "areas covered"; branch grouping + Branch column under All branches; CSV exported 26
+missed rows with the right filename/quoting/BOM; PDF header facts + group sections. photo_proof
+returns 0 rows because the Supabase demo has **no proof photos at all** (the Photos gallery agrees —
+the *mock* seed attaches photos, the Supabase seed doesn't); that path is unexercised against real
+data — submit a photo via the staff app to confirm it end-to-end.
+
+**Remaining from this spec (next slices, in the user's stated priority order):**
+5. Staff-app scheduled-task view polish (occurrence count / due-by labels).
+6. The entire **Transit / inactive-time tracking** feature (activity events, transit periods,
+   dashboard cards, board idle labels, thresholds, redeployment suggestions, transit reports).
+
+## Previous session (2026-07-11, seventh session)
 **IN PROGRESS — big multi-part spec being built in slices.** The user asked for a large
 "Scheduled tasks + benchmarks + schedule management + scheduled-clean reports" feature PLUS a
 separate "transit/inactive-time tracking" feature PLUS a flexible report builder. They chose to
@@ -71,15 +130,12 @@ schema.sql mirrored; mock mirrors it. Verified: generator made 8 for a future da
 a separate status — they show as `overdue` via effectiveStatus (past due_at, still todo); reports can
 treat end-of-day overdue as missed.
 
-**Remaining from this spec (NOT built yet — next slices, in the user's stated priority order):**
-4. Scheduled-Clean report + the flexible report builder (selectable fields, CSV/Excel/**PDF**,
-   presets, branch-scoped) and the "everything reportable" report-type list.
-5. Staff-app scheduled-task view polish (occurrence count / due-by labels).
-6. The entire **Transit / inactive-time tracking** feature (activity events, transit periods,
-   dashboard cards, board idle labels, thresholds, redeployment suggestions, transit reports).
+**Remaining from this spec as of that session** — item 4 (the reports) was delivered in session 7e
+above; see the top of this file for the current list.
 Multi-staff "split" schedules and the separate `schedule_occurrences`/`proof_logs` tables from the
 spec were intentionally NOT created — occurrences reuse `assignments` (simpler, and behaviourally
-identical). Reconsider if the reports need a dedicated occurrences table.
+identical). The reports built in 7e confirmed this holds up: a dedicated occurrences table was not
+needed, since every occurrence is already an assignment row carrying `schedule_id`.
 
 ## Previous session (2026-07-11, sixth session)
 **No task in progress.** **Editable location categories + Live Map grouped by

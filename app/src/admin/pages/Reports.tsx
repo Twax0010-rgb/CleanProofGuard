@@ -3,7 +3,7 @@ import { useAdminAuth } from '../../contexts/AdminAuthContext'
 import { inActiveBranch, useBranch } from '../../contexts/BranchContext'
 import { AUDIT_ACTION_LABELS, canManageRoutes, categorySlugLabel, effectiveStatus, formatClock, formatDuration, ISSUE_SEVERITY_LABELS } from '../../lib/domain'
 import { repo } from '../../lib/repo'
-import type { Area, Assignment, AuditLogEntry, Issue, Staff } from '../../lib/types'
+import type { Area, Assignment, AuditLogEntry, Benchmark, Branch, CleaningSchedule, Issue, LocationCategory, Staff } from '../../lib/types'
 import { AdminLayout } from '../AdminLayout'
 import { ReportBuilderPanel } from '../ReportBuilderPanel'
 
@@ -18,6 +18,10 @@ export function Reports() {
   const [staff, setStaff] = useState<Staff[]>([])
   const [issues, setIssues] = useState<Issue[]>([])
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [schedules, setSchedules] = useState<CleaningSchedule[]>([])
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([])
+  const [categories, setCategories] = useState<LocationCategory[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -29,12 +33,20 @@ export function Reports() {
         repo.listStaffForSite(admin!.siteId),
         repo.listIssuesForSite(admin!.siteId),
         repo.listAuditLogForSite(admin!.siteId),
-      ]).then(([a, ar, s, i, log]) => {
+        repo.listBranches(admin!.siteId),
+        repo.listSchedules(admin!.siteId),
+        repo.listBenchmarks(admin!.siteId),
+        repo.listCategories(admin!.siteId),
+      ]).then(([a, ar, s, i, log, b, sch, bm, cat]) => {
         setAssignments(a)
         setAreas(ar)
         setStaff(s)
         setIssues(i)
         setAuditLog(log)
+        setBranches(b)
+        setSchedules(sch)
+        setBenchmarks(bm)
+        setCategories(cat)
         setLoading(false)
       })
     }
@@ -50,6 +62,36 @@ export function Reports() {
   const bAreas = useMemo(() => areas.filter((a) => inActiveBranch(a.branchId, activeBranchId)), [areas, activeBranchId])
   const bStaff = useMemo(() => staff.filter((s) => inActiveBranch(s.branchId, activeBranchId)), [staff, activeBranchId])
   const bIssues = useMemo(() => issues.filter((i) => inActiveBranch(i.branchId, activeBranchId)), [issues, activeBranchId])
+
+  // Schedules, benchmarks and categories can be site-wide (null branch) — those apply everywhere,
+  // so they survive a branch filter; branch-pinned ones only show under their own branch.
+  const bSchedules = useMemo(
+    () => schedules.filter((s) => !s.branchId || inActiveBranch(s.branchId, activeBranchId)),
+    [schedules, activeBranchId],
+  )
+  const bBenchmarks = useMemo(
+    () => benchmarks.filter((b) => !b.branchId || inActiveBranch(b.branchId, activeBranchId)),
+    [benchmarks, activeBranchId],
+  )
+  const bCategories = useMemo(
+    () => categories.filter((c) => !c.branchId || inActiveBranch(c.branchId, activeBranchId)),
+    [categories, activeBranchId],
+  )
+
+  const reportCtx = useMemo(
+    () => ({
+      assignments: bAssignments,
+      areas: bAreas,
+      staff: bStaff,
+      issues: bIssues,
+      auditLog,
+      branches,
+      schedules: bSchedules,
+      benchmarks: bBenchmarks,
+      categories: bCategories,
+    }),
+    [bAssignments, bAreas, bStaff, bIssues, auditLog, branches, bSchedules, bBenchmarks, bCategories],
+  )
 
   const openIssues = useMemo(
     () => bIssues.filter((i) => i.status === 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
@@ -126,7 +168,7 @@ export function Reports() {
 
       {tab === 'builder' ? (
         <div className="flex-1 overflow-auto p-6">
-          <ReportBuilderPanel admin={admin} assignments={bAssignments} areas={bAreas} staff={bStaff} issues={bIssues} auditLog={auditLog} />
+          <ReportBuilderPanel admin={admin} ctx={reportCtx} branchLabel={activeBranch ? activeBranch.name : 'All branches'} />
         </div>
       ) : (
       <div className="flex-1 overflow-auto p-6">

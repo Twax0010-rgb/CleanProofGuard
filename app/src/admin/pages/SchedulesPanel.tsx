@@ -1,13 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Avatar } from '../../components/ui/Avatar'
 import { Field, inputCls, ModalShell } from '../../components/ui/Modal'
+import { SCHEDULE_RECURRENCE_LABELS as RECUR_LABELS } from '../../lib/domain'
 import { repo } from '../../lib/repo'
 import type { UpdateScheduleInput } from '../../lib/repo/types'
 import type { AdminUser, Area, Assignment, Branch, CleaningSchedule, LocationCategory, Staff } from '../../lib/types'
-
-const RECUR_LABELS: Record<CleaningSchedule['recurrenceType'], string> = {
-  today: 'Today only', daily: 'Daily', weekdays: 'Weekdays', weekends: 'Weekends', custom: 'Custom days',
-}
 
 function canManageSchedules(role: AdminUser['role']): boolean {
   return role === 'superuser' || role === 'super_admin' || role === 'manager'

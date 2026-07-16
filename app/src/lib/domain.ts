@@ -11,6 +11,7 @@ import type {
   Branch,
   BranchStatus,
   ChecklistTask,
+  CleaningSchedule,
   Issue,
   PermissionAction,
   PermissionOverrides,
@@ -151,6 +152,14 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   manager: 'Admin / Manager',
   supervisor: 'Supervisor',
   read_only: 'Read-only',
+}
+
+export const SCHEDULE_RECURRENCE_LABELS: Record<CleaningSchedule['recurrenceType'], string> = {
+  today: 'Today only',
+  daily: 'Daily',
+  weekdays: 'Weekdays',
+  weekends: 'Weekends',
+  custom: 'Custom days',
 }
 
 /** The full feature set, in nav order — used to render permission matrices. */

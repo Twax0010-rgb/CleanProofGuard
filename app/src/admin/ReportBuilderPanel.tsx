@@ -7,31 +7,19 @@ import {
   defaultFieldsFor,
   formatDateRangeLabel,
   REPORT_FIELDS,
+  REPORT_PRESETS,
+  REPORT_TYPE_HINTS,
   REPORT_TYPE_LABELS,
   REPORT_TYPES,
   resolveDateRange,
 } from '../lib/reports'
-import type { DateRange, ReportRow } from '../lib/reports'
-import type { AdminUser, Area, Assignment, AuditLogEntry, Issue, ReportTemplate, ReportType, Staff } from '../lib/types'
+import type { DateRange, ReportContext, ReportPreset, ReportRow, ReportRowFilter } from '../lib/reports'
+import type { AdminUser, ReportTemplate, ReportType } from '../lib/types'
 import { exportRowsToCsv, exportRowsToPdf, exportRowsToXlsx } from '../lib/reportExport'
 
 const PAGE_SIZE = 25
 
-export function ReportBuilderPanel({
-  admin,
-  assignments,
-  areas,
-  staff,
-  issues,
-  auditLog,
-}: {
-  admin: AdminUser
-  assignments: Assignment[]
-  areas: Area[]
-  staff: Staff[]
-  issues: Issue[]
-  auditLog: AuditLogEntry[]
-}) {
+export function ReportBuilderPanel({ admin, ctx, branchLabel }: { admin: AdminUser; ctx: ReportContext; branchLabel: string }) {
   const [reportType, setReportType] = useState<ReportType>('cleaning_proof')
   const [range, setRange] = useState<DateRange>(() => resolveDateRange('today'))
   const [selectedFields, setSelectedFields] = useState<string[]>(() => defaultFieldsFor('cleaning_proof'))
@@ -39,6 +27,8 @@ export function ReportBuilderPanel({
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [groupBy, setGroupBy] = useState<string | null>(null)
+  const [rowFilter, setRowFilter] = useState<ReportRowFilter | null>(null)
+  const [activePresetId, setActivePresetId] = useState<string | null>(null)
   const [page, setPage] = useState(1)
 
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
@@ -67,6 +57,23 @@ export function ReportBuilderPanel({
     setSelectedFields(defaultFieldsFor(type))
     setSortKey(null)
     setGroupBy(null)
+    setRowFilter(null)
+    setActivePresetId(null)
+    setPage(1)
+    setActiveTemplateId(null)
+    setTemplateName('')
+  }
+
+  function applyPreset(preset: ReportPreset) {
+    setReportType(preset.reportType)
+    setSelectedFields(preset.fields ?? defaultFieldsFor(preset.reportType))
+    setRange(resolveDateRange(preset.range))
+    setGroupBy(preset.groupBy ?? null)
+    setSortKey(preset.sortBy ?? null)
+    setSortDir(preset.sortDir ?? 'asc')
+    setRowFilter(preset.filter ?? null)
+    setActivePresetId(preset.id)
+    setSearch('')
     setPage(1)
     setActiveTemplateId(null)
     setTemplateName('')
@@ -88,16 +95,17 @@ export function ReportBuilderPanel({
     })
   }
 
-  const rows = useMemo(
-    () => buildReportRows(reportType, { assignments, areas, staff, issues, auditLog }, range),
-    [reportType, assignments, areas, staff, issues, auditLog, range],
-  )
+  const rows = useMemo(() => buildReportRows(reportType, ctx, range), [reportType, ctx, range])
 
   const filteredRows = useMemo(() => {
-    if (!search.trim()) return rows
-    const q = search.trim().toLowerCase()
-    return rows.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(q)))
-  }, [rows, search])
+    let out = rows
+    if (rowFilter) out = out.filter((r) => String(r[rowFilter.key] ?? '') === rowFilter.value)
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      out = out.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(q)))
+    }
+    return out
+  }, [rows, search, rowFilter])
 
   const sortedRows = useMemo(() => {
     if (!sortKey) return filteredRows
@@ -161,6 +169,10 @@ export function ReportBuilderPanel({
     setTemplateName(t.name)
     setShareTemplate(t.shared)
     setActiveTemplateId(t.id)
+    // A template is a complete configuration — drop any preset's filter so it can't silently
+    // narrow the template's rows.
+    setRowFilter(null)
+    setActivePresetId(null)
     setPage(1)
   }
 
@@ -174,17 +186,37 @@ export function ReportBuilderPanel({
   }
 
   const fileBase = `${REPORT_TYPE_LABELS[reportType].replace(/[^A-Za-z0-9]+/g, '_')}_${dateRangeFileTag(range)}`
-  const displayFields = allFields.filter((f) => selectedFields.includes(f.key))
+  // Column order follows the user's picks, not the field catalogue, so reordering actually exports reordered.
+  const displayFields = selectedFields.map((key) => allFields.find((f) => f.key === key)).filter((f) => !!f)
+
+  /** What was applied on top of the report type — reads the same in the PDF header and the audit trail. */
+  const filterSummary = [rowFilter?.label, search.trim() ? `matching "${search.trim()}"` : null].filter(Boolean).join(' · ')
+  const groupByField = groupBy ? allFields.find((f) => f.key === groupBy) : undefined
 
   async function doExport(format: 'xlsx' | 'csv' | 'pdf') {
     const exportRows = sortedRows
     if (format === 'xlsx') exportRowsToXlsx(exportRows, displayFields, fileBase)
     else if (format === 'csv') exportRowsToCsv(exportRows, displayFields, fileBase)
-    else exportRowsToPdf(exportRows, displayFields, fileBase, REPORT_TYPE_LABELS[reportType], formatDateRangeLabel(range))
+    else
+      exportRowsToPdf(exportRows, displayFields, fileBase, {
+        title: REPORT_TYPE_LABELS[reportType],
+        branchLabel,
+        dateRangeLabel: formatDateRangeLabel(range),
+        filterLabel: filterSummary,
+        generatedBy: admin.name,
+        groupBy: groupByField ? { key: groupByField.key, label: groupByField.label } : undefined,
+      })
     await repo.logReportExport(
       admin.siteId,
       REPORT_TYPE_LABELS[reportType],
-      `${format.toUpperCase()} · ${displayFields.length} fields · ${formatDateRangeLabel(range)}`,
+      [
+        `${format.toUpperCase()} · ${exportRows.length} rows · ${displayFields.length} fields`,
+        branchLabel,
+        formatDateRangeLabel(range),
+        filterSummary,
+      ]
+        .filter(Boolean)
+        .join(' · '),
     )
   }
 
@@ -192,12 +224,30 @@ export function ReportBuilderPanel({
     <div className="grid grid-cols-[280px_1fr] gap-4">
       <div className="flex flex-col gap-4">
         <div className="rounded-2xl border border-line bg-white p-4">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Start from</div>
+          <div className="flex flex-col gap-1">
+            {REPORT_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => applyPreset(preset)}
+                title={preset.description}
+                className={`rounded-xl px-3 py-2 text-left ${activePresetId === preset.id ? 'bg-verified-tint' : 'hover:bg-app'}`}
+              >
+                <div className="text-sm font-semibold text-ink">{preset.name}</div>
+                <div className="text-[11px] leading-tight text-muted">{preset.description}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-line bg-white p-4">
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Report type</div>
           <div className="flex flex-col gap-1">
             {REPORT_TYPES.map((type) => (
               <button
                 key={type}
                 onClick={() => changeReportType(type)}
+                title={REPORT_TYPE_HINTS[type]}
                 className={`rounded-xl px-3 py-2 text-left text-sm font-semibold ${
                   reportType === type ? 'bg-ink text-white' : 'text-ink hover:bg-app'
                 }`}
@@ -206,6 +256,7 @@ export function ReportBuilderPanel({
               </button>
             ))}
           </div>
+          <p className="mt-2 text-[11px] leading-tight text-muted">{REPORT_TYPE_HINTS[reportType]}</p>
         </div>
 
         <div className="rounded-2xl border border-line bg-white p-4">
@@ -335,7 +386,23 @@ export function ReportBuilderPanel({
               className="flex-1 bg-transparent text-sm outline-none"
             />
           </div>
-          <span className="text-xs text-muted">{sortedRows.length} rows</span>
+          {rowFilter && (
+            <button
+              onClick={() => {
+                setRowFilter(null)
+                setActivePresetId(null)
+                setPage(1)
+              }}
+              title="Remove this filter"
+              className="flex h-7 items-center gap-1.5 rounded-full bg-verified-tint px-2.5 text-xs font-bold text-verified-ink"
+            >
+              {rowFilter.label}
+              <span aria-hidden>×</span>
+            </button>
+          )}
+          <span className="whitespace-nowrap text-xs text-muted">
+            {sortedRows.length} {sortedRows.length === 1 ? 'row' : 'rows'} · {branchLabel}
+          </span>
           <div className="h-6 w-px bg-line" />
           <button
             onClick={() => doExport('xlsx')}
@@ -364,7 +431,11 @@ export function ReportBuilderPanel({
           {displayFields.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted">Select at least one field to see results.</div>
           ) : sortedRows.length === 0 ? (
-            <div className="py-10 text-center text-sm text-muted">No data for this report type in the selected range.</div>
+            <div className="py-10 text-center text-sm text-muted">
+              {rows.length === 0
+                ? 'No data for this report type in the selected range.'
+                : `Nothing matches the current filter — ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} in range.`}
+            </div>
           ) : (
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-app text-xs font-bold uppercase tracking-wide text-muted">

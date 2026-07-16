@@ -363,12 +363,16 @@ export interface AuditLogEntry {
 
 export type ReportType =
   | 'cleaning_proof'
+  | 'scheduled_clean'
+  | 'schedule_compliance'
   | 'assignments'
   | 'staff_performance'
   | 'locations'
   | 'issues'
   | 'overdue_sla'
+  | 'photo_proof'
   | 'qr_scans'
+  | 'benchmarks'
   | 'audit_log'
 
 /** An admin's saved report configuration — fields, filters, sort/group — reusable across sessions. */
