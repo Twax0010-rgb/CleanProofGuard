@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useStaffAuth } from '../../contexts/StaffAuthContext'
 import { repo } from '../../lib/repo'
+import type { ScanAreaFailure } from '../../lib/repo/types'
 import type { Area, Assignment } from '../../lib/types'
 import { QrScanner } from '../components/QrScanner'
 import { PhoneScreen } from '../PhoneScreen'
+
+const SCAN_FAILURE_MESSAGES: Record<ScanAreaFailure, string> = {
+  unknown_code: "That tag doesn't match any area here. Check the code and try again.",
+  inactive_area: 'This area has been deactivated. Check with your supervisor.',
+  other_branch: 'That tag belongs to a different site. Check with your supervisor.',
+}
 
 function normalizeCode(v: string) {
   const trimmed = v.trim()
@@ -23,6 +31,11 @@ function codePrefixOf(areaCode: string) {
 
 export function ScanTag() {
   const { assignmentId = '' } = useParams()
+  /** No assignment in the URL means a free scan: the staff member is standing at some area that
+   * isn't the next job on their route (often because the route is finished), and the tag itself
+   * decides what they open. */
+  const freeScan = !assignmentId
+  const { staff } = useStaffAuth()
   const navigate = useNavigate()
   const [assignment, setAssignment] = useState<Assignment | null>(null)
   const [area, setArea] = useState<Area | null>(null)
@@ -37,15 +50,33 @@ export function ScanTag() {
   const manualInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    if (freeScan) return
     repo.getAssignment(assignmentId).then((a) => {
       setAssignment(a)
       if (a) repo.getArea(a.areaId).then(setArea)
     })
-  }, [assignmentId])
+  }, [assignmentId, freeScan])
 
   const complete = useCallback(
     async (code: string) => {
-      if (!assignment || matched) return
+      if (matched) return
+
+      if (freeScan) {
+        if (!staff) return
+        setMatched(true)
+        const result = await repo.scanArea(staff, normalizeCode(code))
+        if (!result.ok) {
+          // Let them try another tag rather than stranding them on a dead screen.
+          setMatched(false)
+          setError(SCAN_FAILURE_MESSAGES[result.reason])
+          return
+        }
+        await repo.startAssignment(result.assignment.id)
+        navigate(`/staff/checklist/${result.assignment.id}`, { replace: true })
+        return
+      }
+
+      if (!assignment) return
       if (area && !area.active) {
         setError('This area has been deactivated. Check with your supervisor.')
         return
@@ -58,17 +89,18 @@ export function ScanTag() {
       await repo.startAssignment(assignment.id)
       navigate(`/staff/checklist/${assignment.id}`, { replace: true })
     },
-    [assignment, area, matched, navigate],
+    [assignment, area, freeScan, matched, navigate, staff],
   )
 
   function handleManualSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!manualCode) return
-    // Re-attach the branch prefix the input shows as a fixed label before matching.
+    // Re-attach the branch prefix the input shows as a fixed label before matching. A free scan
+    // has no known area to take a prefix from, so the whole code is typed.
     complete(assignment ? codePrefixOf(assignment.areaCode) + manualCode : manualCode)
   }
 
-  if (!assignment) {
+  if (!freeScan && !assignment) {
     return (
       <PhoneScreen bg="bg-[#0C0F12]" className="items-center justify-center text-white/60">
         Loading…
@@ -106,8 +138,17 @@ export function ScanTag() {
           )}
         </div>
         <p className="mt-7 max-w-[250px] text-center text-[15px] leading-relaxed text-white/70">
-          Point at the QR tag near the entrance to{' '}
-          <strong className="font-bold text-white">{assignment.areaName}</strong>
+          {freeScan ? (
+            <>
+              Point at the QR tag near the entrance to{' '}
+              <strong className="font-bold text-white">any area you need to clean</strong>
+            </>
+          ) : (
+            <>
+              Point at the QR tag near the entrance to{' '}
+              <strong className="font-bold text-white">{assignment!.areaName}</strong>
+            </>
+          )}
         </p>
         {area && !area.active && (
           <p className="mt-3 max-w-[260px] text-center text-[13px] text-red-300">
@@ -150,7 +191,7 @@ export function ScanTag() {
           className="flex items-center gap-3 rounded-xl border border-white/14 bg-white/7 px-4"
           style={{ height: 52 }}
         >
-          <span className="text-[13px] text-white/50">{codePrefixOf(assignment.areaCode)}</span>
+          {!freeScan && <span className="text-[13px] text-white/50">{codePrefixOf(assignment!.areaCode)}</span>}
           <input
             ref={manualInputRef}
             value={manualCode}
@@ -158,7 +199,7 @@ export function ScanTag() {
               setManualCode(e.target.value.toUpperCase())
               setError(null)
             }}
-            placeholder={assignment.areaCode.slice(codePrefixOf(assignment.areaCode).length)}
+            placeholder={freeScan ? 'Enter the full area code' : assignment!.areaCode.slice(codePrefixOf(assignment!.areaCode).length)}
             className="flex-1 bg-transparent font-mono text-base tracking-wider text-white placeholder-white/25 outline-none"
           />
           <button

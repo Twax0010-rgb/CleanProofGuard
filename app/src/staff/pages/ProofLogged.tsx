@@ -125,9 +125,16 @@ export function ProofLogged() {
             </Button>
           </>
         ) : (
-          <Button fullWidth onClick={() => navigate('/staff')}>
-            Back to my route
-          </Button>
+          <>
+            {/* Their route is clear, but they may well have been sent somewhere else — this is the
+                moment they'd walk to it, so offer the scan here rather than only on the route screen. */}
+            <Button fullWidth onClick={() => navigate('/staff/scan')}>
+              Scan another area
+            </Button>
+            <Button variant="secondary" size="md" fullWidth className="!h-13" onClick={() => navigate('/staff')}>
+              Back to my route
+            </Button>
+          </>
         )}
       </div>
     </PhoneScreen>

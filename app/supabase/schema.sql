@@ -869,9 +869,12 @@ begin
     delete from assignments where area_id = p_area_id and status <> 'done';
   elsif p_active is not null and p_active = true and v_before.active = false then
     select coalesce(max(sort_order), 0) + 1 into v_sort_order from assignments where site_id = v_after.site_id;
-    insert into assignments (site_id, area_id, area_name, area_code, status, due_at, sort_order)
+    -- branch_id must come from the area: every branch-scoped admin view filters on it, so an
+    -- assignment without one is invisible on the board (migration assignment_branch_id_fix).
+    insert into assignments (site_id, branch_id, area_id, area_name, area_code, status, due_at, sort_order)
     values (
       v_after.site_id,
+      v_after.branch_id,
       v_after.id,
       v_after.name,
       v_after.code,

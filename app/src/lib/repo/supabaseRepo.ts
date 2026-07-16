@@ -342,6 +342,9 @@ async function spawnNextCycle(area: Area, staffId: string | null, sortOrder: num
     .from('assignments')
     .insert({
       site_id: area.siteId,
+      // Without this the next cycle lands with a null branch and drops out of every
+      // branch-scoped admin view — the work silently disappears from the board.
+      branch_id: area.branchId,
       area_id: area.id,
       area_name: area.name,
       area_code: area.code,
@@ -680,6 +683,74 @@ export const supabaseRepo: DataRepo = {
       .maybeSingle()
     if (error) throw error
     return data ? mapAssignment(data) : null
+  },
+
+  async scanArea(staff, code) {
+    const { data: areaRow, error: areaError } = await client()
+      .from('areas')
+      .select('*')
+      .eq('site_id', staff.siteId)
+      .ilike('code', code.trim())
+      .maybeSingle()
+    if (areaError) throw areaError
+    if (!areaRow) return { ok: false, reason: 'unknown_code' }
+    const area = mapArea(areaRow)
+    if (!area.active) return { ok: false, reason: 'inactive_area' }
+    if (area.branchId !== staff.branchId) return { ok: false, reason: 'other_branch' }
+
+    const { data: openRows, error: openError } = await client()
+      .from('assignments')
+      .select(ASSIGNMENT_SELECT)
+      .eq('area_id', area.id)
+      .neq('status', 'done')
+    if (openError) throw openError
+    const open = (openRows ?? []).map(mapAssignment)
+
+    const mine = open.find((a) => a.staffId === staff.id)
+    if (mine) return { ok: true, assignment: mine, created: false }
+
+    // Reuse claimAssignment so the claim-once guarantee is the same one the pick-up list relies on:
+    // if someone beat us to it, fall through and open our own task rather than stealing theirs.
+    const unclaimed = open.find((a) => !a.staffId)
+    if (unclaimed) {
+      const claimed = await supabaseRepo.claimAssignment(unclaimed.id, staff.id)
+      if (claimed) return { ok: true, assignment: claimed, created: false }
+    }
+
+    const { data: sortRow } = await client()
+      .from('assignments')
+      .select('sort_order')
+      .eq('site_id', staff.siteId)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const { data: inserted, error: insertError } = await client()
+      .from('assignments')
+      .insert({
+        site_id: area.siteId,
+        branch_id: area.branchId,
+        area_id: area.id,
+        area_name: area.name,
+        area_code: area.code,
+        staff_id: staff.id,
+        status: 'todo',
+        // Ad-hoc work has no due time — nobody promised one, so it can never read as late.
+        due_at: null,
+        sort_order: ((sortRow?.sort_order as number) ?? 0) + 1,
+        created_by_name: staff.fullName,
+      })
+      .select('id')
+      .single()
+    if (insertError) throw insertError
+    if (area.taskTemplate.length > 0) {
+      const { error: taskError } = await client()
+        .from('assignment_tasks')
+        .insert(area.taskTemplate.map((label, i) => ({ assignment_id: inserted.id, label, completed: false, sort_order: i })))
+      if (taskError) throw taskError
+    }
+    const assignment = await fetchAssignment(inserted.id as string)
+    if (!assignment) throw new Error('Could not open the scanned area')
+    return { ok: true, assignment, created: true }
   },
 
   async publishRoutes(siteId) {

@@ -95,6 +95,16 @@ export interface SaveReportTemplateInput {
   shared: boolean
 }
 
+/** Why a scanned tag couldn't be turned into work, so the scanner can say something useful
+ * instead of just refusing. */
+export type ScanAreaFailure = 'unknown_code' | 'inactive_area' | 'other_branch'
+
+/** `created` distinguishes work that already existed (their route, or an unassigned job they just
+ * claimed) from an ad-hoc task the scan itself opened — the UI says so, since one is extra work. */
+export type ScanAreaResult =
+  | { ok: true; assignment: Assignment; created: boolean }
+  | { ok: false; reason: ScanAreaFailure }
+
 export interface ScheduleBreakInput {
   start: string
   end: string
@@ -348,6 +358,12 @@ export interface DataRepo {
   listOpenAssignments(branchId: string): Promise<Assignment[]>
   /** Staff claims an unassigned task for themselves. Claim-once: resolves null if someone else got it first. */
   claimAssignment(assignmentId: string, staffId: string): Promise<Assignment | null>
+  /** Resolves a tag scanned outside the staff member's route — their route is finished, or they've
+   * been sent to cover an area that was never assigned to them — into something they can start:
+   * their own open assignment for that area, else an unassigned one they claim, else a fresh ad-hoc
+   * task. The area's own checklist is copied onto an ad-hoc task, which has no due time: nobody
+   * promised one, so it can't be late. */
+  scanArea(staff: Staff, code: string): Promise<ScanAreaResult>
 
   /** All of today's assignments for a site, assigned and unassigned. */
   getSiteAssignments(siteId: string): Promise<Assignment[]>

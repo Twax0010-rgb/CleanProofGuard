@@ -1,6 +1,48 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-16 session 7e, for the next session)
+## ⏸ Where we left off (2026-07-16 session 7f, for the next session)
+**Free scan + a real branch bug.** Verified against Supabase as AR-2290 (Aisha Rahman, demo PIN).
+
+**Staff can now scan an area that isn't on their route.** The scan flow was assignment-first — you
+picked a job, then scanned to prove you were there, and the scanner rejected any tag that wasn't
+that job's area. So when a route was finished (or empty) the button went dead reading "All areas
+complete", and staff sent to cover somewhere else had no way in. Now:
+- **`/staff/scan` with no assignment id = a free scan**: the tag decides what opens. New repo method
+  **`scanArea(staff, code)`** → `ScanAreaResult`: resolves to their own open assignment for that
+  area, else an unassigned one they **claim** (reusing `claimAssignment`, so the claim-once
+  guarantee is the same one the pick-up list relies on), else a **fresh ad-hoc task** with the
+  area's own checklist and **no due time** (nobody promised one, so it can't read as late).
+  Failures (`unknown_code` / `inactive_area` / `other_branch`) show a message and let them retry.
+- The route button is **never disabled** now ("Scan next area" → "Scan another area"), the
+  proof-logged screen offers the same scan, and a route with *nothing* on it says so instead of
+  rendering an empty void (the old "All areas complete" note only appeared if something had
+  actually been completed — with 0 of 0 you got a blank screen and a dead button).
+- **No audit entry for an ad-hoc scan, deliberately**: the staff app runs on the anon key, which
+  can't write `audit_logs` (policy is admins-only) and shouldn't be able to. `created_by_name` is
+  the provenance record — it's on the board and in the assignment report's "Created by" column, and
+  both repos behave identically. Don't "fix" this by loosening the audit insert policy.
+
+**BUG FIXED — assignments were being created with a null `branch_id`** (migration
+`assignment_branch_id_fix`). Every branch-scoped view filters on `branch_id`, and
+`inActiveBranch('', x)` is false, so that work **silently vanished from the board, the live map and
+the staff pick-up list** — visible only under "All branches". Two sources, both Supabase-only (the
+mock repo always copied `area.branchId`, which is why it never showed in dev):
+1. `spawnNextCycle` in supabaseRepo.ts — fires whenever staff submit proof on a recurring area.
+2. The reactivate path of the `update_area` RPC.
+**4 real rows were already orphaned** (3 still `todo` from Jul 11) and are now backfilled from
+`areas.branch_id`; two of them immediately reappeared in Aisha's "Available to pick up" list, which
+is how it was confirmed. The migration also drops a **stale 5-arg `update_area` overload** — drift
+from the categories migration (schema.sql only ever declared the 6-arg one), carrying the same bug.
+schema.sql mirrors both. If you add another `insert into assignments`, set `branch_id`.
+
+**Also verified this session:** the `photo_proof` report against the real proof photo submitted from
+the staff app (2 rows, Before + After, matching the gallery) — the gap flagged in 7e is now closed.
+
+**Remaining from the spec:**
+5. Staff-app scheduled-task view polish (occurrence count / due-by labels).
+6. The entire **Transit / inactive-time tracking** feature — in progress next.
+
+## Previous session (2026-07-16, session 7e)
 **No task in progress.** This session delivered **item 4 of the spec — the Scheduled-Clean report +
 the flexible report builder**. Verified in the browser against Supabase as owen@ (demo superuser —
 the real thando@/sikha@ passwords were deliberately not used).

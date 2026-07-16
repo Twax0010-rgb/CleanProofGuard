@@ -40,6 +40,15 @@ export default function App() {
           </RequireStaff>
         }
       />
+      {/* Without an assignment id this is a free scan — the tag decides what opens. */}
+      <Route
+        path="/staff/scan"
+        element={
+          <RequireStaff>
+            <ScanTag />
+          </RequireStaff>
+        }
+      />
       <Route
         path="/staff/scan/:assignmentId"
         element={

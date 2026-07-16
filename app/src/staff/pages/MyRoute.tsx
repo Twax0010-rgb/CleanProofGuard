@@ -362,9 +362,11 @@ export function MyRoute() {
               </div>
             )
           })}
-          {pending.length === 0 && completed.length > 0 && (
+          {pending.length === 0 && (
             <div className="rounded-[15px] border border-dashed border-line bg-white/50 p-4 text-center text-[13px] font-semibold text-muted">
-              All areas complete for this shift
+              {completed.length > 0
+                ? 'All areas complete for this shift'
+                : 'Nothing on your route today — scan an area tag to start a clean'}
             </div>
           )}
           {openTasks.length > 0 && (
@@ -448,8 +450,9 @@ export function MyRoute() {
         <Button
           fullWidth
           className="pointer-events-auto"
-          disabled={!next}
-          onClick={() => next && navigate(`/staff/scan/${next.id}`)}
+          // Never disabled: a finished route doesn't mean the shift is over. Staff still get sent
+          // to areas that were never on their route, and they scan the tag to open the work.
+          onClick={() => navigate(next ? `/staff/scan/${next.id}` : '/staff/scan')}
           icon={
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
@@ -457,7 +460,7 @@ export function MyRoute() {
             </svg>
           }
         >
-          {next ? 'Scan next area' : 'All areas complete'}
+          {next ? 'Scan next area' : 'Scan another area'}
         </Button>
       </div>
     </PhoneScreen>

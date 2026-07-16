@@ -579,6 +579,34 @@ export const mockRepo: DataRepo = {
     return delay(updated)
   },
 
+  async scanArea(staff, code) {
+    const wanted = code.trim().toUpperCase()
+    const area = state.areas.find((a) => a.siteId === staff.siteId && a.code.toUpperCase() === wanted)
+    if (!area) return delay({ ok: false, reason: 'unknown_code' } as const)
+    if (!area.active) return delay({ ok: false, reason: 'inactive_area' } as const)
+    if (area.branchId !== staff.branchId) return delay({ ok: false, reason: 'other_branch' } as const)
+
+    const open = state.assignments.filter((a) => a.areaId === area.id && a.status !== 'done')
+    const mine = open.find((a) => a.staffId === staff.id)
+    if (mine) return delay({ ok: true, assignment: mine, created: false } as const)
+
+    const unclaimed = open.find((a) => !a.staffId)
+    if (unclaimed) {
+      const claimed = updateAssignment(unclaimed.id, (a) => ({ ...a, staffId: staff.id }))
+      persist()
+      return delay({ ok: true, assignment: claimed, created: false } as const)
+    }
+
+    // No audit entry: the staff app runs on the anon key, which can't write the trail in Supabase
+    // mode (and shouldn't be able to). createdByName is the provenance record — it's on the board
+    // and in the assignment report's "Created by" column, and both repos behave the same way.
+    const maxSort = Math.max(0, ...state.assignments.filter((a) => a.siteId === staff.siteId).map((a) => a.sortOrder))
+    const created = buildAssignmentFor(area, staff.id, maxSort + 1, null, { createdByName: staff.fullName })
+    state.assignments = [...state.assignments, created]
+    persist()
+    return delay({ ok: true, assignment: created, created: true } as const)
+  },
+
   async publishRoutes(siteId) {
     requireRole(canManageRoutes, 'publish routes')
     logAction(siteId, 'routes_published', state.site.name)
