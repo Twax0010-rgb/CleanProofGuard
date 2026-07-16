@@ -1,6 +1,29 @@
 # Clean Proof Guard — Project Handoff
 
-## ⏸ Where we left off (2026-07-16 session 7g, for the next session)
+## ⏸ Where we left off (2026-07-16 session 7h, for the next session)
+**BUG FIXED — the cleaner's note never reached the admin.** Reported by the user: they typed a note
+in the staff app and it didn't show up. The staff app **saved it correctly** (`assignments.note`);
+the admin simply never rendered it. Every "note" in `src/admin/` was something else — branch notes,
+schedule notes, and in the proof drawer the *supervisor's* `reviewNote`. The cleaner's note only
+existed as a `notes` column in the report builder, so nobody reviewing proof would ever see it.
+
+Now surfaced everywhere the work appears, wired through `ProofPhotoView.staffNote` (new field,
+populated in both repos) → `PhotoSet.staffNote`:
+- **Photo gallery card** — quoted under the staff name. This one mattered most: the card has quick
+  Approve/Reject buttons, so proof could be approved **without ever opening the drawer**. A note
+  saying "couldn't reach the back corner, ladder missing" would have been approved unread.
+- **Proof drawer** — a "Note from {staff}" block, deliberately **above** the metadata and the review
+  buttons: if a cleaner left a note it's usually why the photos look the way they do.
+- **Live activity feed** — appended to the `verified` event's detail in `deriveActivity`.
+- **Board card** — an icon carrying the note text on hover (the card is too small to print it).
+- **Photo CSV export** — gained a **Staff note** column, plus **Review note** beside it; it had been
+  carrying neither, which made the two easy to conflate.
+
+Verified against the user's real note ("Test the note" on Sikha's L6 · Executive Suite proof) on all
+four surfaces plus the CSV. Note the board card lives inside the **collapsed** "Completed · n"
+section — expand it to see the icon. Build + lint clean, no console errors.
+
+## Previous session (2026-07-16, session 7g)
 **Transit / inactive-time tracking — first slice DONE.** The last big feature from the spec.
 Verified against Supabase; every number below was hand-checked against the raw timestamps first.
 
